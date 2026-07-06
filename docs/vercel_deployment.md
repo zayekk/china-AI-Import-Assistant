@@ -2,27 +2,42 @@
 
 ## Architecture du déploiement
 
-Un seul projet Vercel héberge :
-- le **frontend** (React/Vite) : build statique servi depuis `frontend/dist`.
-- le **backend** (FastAPI) : une fonction serverless Python unique (`api/index.py`)
-  qui réexpose l'application existante (`backend/app/main.py`) sous `/api/*`.
+Un seul projet Vercel héberge, via la fonctionnalité **Services** de Vercel (deux
+"services" indépendants au sein d'un même déploiement) :
+- le **service `frontend`** (React/Vite), racine `frontend/` : build statique.
+- le **service `backend`** (FastAPI), racine `.` (le repo entier) : une fonction
+  serverless Python unique dont le point d'entrée est `api/index.py` (qui réexpose
+  l'application existante `backend/app/main.py`).
 
-Frontend et API partagent donc le même domaine Vercel : `frontend/src/services/apiClient.js`
+Le service backend a volontairement pour racine le **repo entier** (`"root": "."`)
+et non `backend/` : le code du backend importe deux paquets Python situés à côté de
+`backend/` (`ai_engine/` et `scraper/`), pas dedans. Si la racine du service backend
+avait été limitée à `backend/`, ces paquets frères n'auraient pas été inclus dans le
+build isolé de ce service, provoquant l'échec `could not import "api/index.py"`
+rencontré lors de la première tentative de déploiement.
+
+Frontend et API partagent le même domaine Vercel : `frontend/src/services/apiClient.js`
 continue d'appeler l'URL relative `/api/v1/...` sans configuration supplémentaire
-(pas de CORS à gérer entre les deux).
+(pas de CORS à gérer entre les deux). Les rewrites de `vercel.json` garantissent que
+le service backend reçoit le chemin de requête original tel quel (ex. `/api/v1/analyze-text`),
+ce qui correspond exactement au préfixe `API_V1_PREFIX = "/api/v1"` déjà utilisé par
+l'application FastAPI.
 
 ```
 requête utilisateur
         │
         ▼
- ┌─────────────────────┐        /api/*        ┌───────────────────────┐
- │ frontend/dist (SPA)  │ ───────────────────▶ │ api/index.py (FastAPI) │
- │ servi statiquement   │                      │ fonction serverless    │
- └─────────────────────┘                      └───────────┬───────────┘
-                                                            │
-                                                            ▼
-                                              PostgreSQL externe (obligatoire,
-                                              voir "Base de données" ci-dessous)
+ ┌───────────────────────┐        /api/*        ┌─────────────────────────────┐
+ │ service "frontend"     │ ◀──────────────────▶ │ service "backend"            │
+ │ racine: frontend/       │  (tout le reste)     │ racine: . (repo entier)      │
+ │ build statique (dist/)  │                      │ entrypoint: api.index:app    │
+ └───────────────────────┘                      │ inclut backend/, ai_engine/, │
+                                                  │ scraper/ (tous sous la racine)│
+                                                  └──────────────┬──────────────┘
+                                                                 │
+                                                                 ▼
+                                                   PostgreSQL externe (obligatoire,
+                                                   voir "Base de données" ci-dessous)
 ```
 
 ## ⚠️ Limites réelles de cet environnement (à lire avant de déployer)
@@ -97,17 +112,35 @@ que ces fonctionnalités ne sont pas disponibles sur Vercel.
 
 ## Notes techniques
 
+- **Modèle "Services" Vercel.** `vercel.json` déclare deux services (`frontend`,
+  `backend`) plutôt qu'un unique `buildCommand`/`outputDirectory` global : c'est le
+  mécanisme actuellement recommandé par Vercel pour combiner un frontend JS et un
+  backend Python dans un même projet. Les champs de build (`installCommand`,
+  `buildCommand`, `outputDirectory`) doivent être définis **à l'intérieur** de
+  chaque service, plus au niveau racine du fichier.
+- **`entrypoint: "api.index:app"`** pointe explicitement vers `api/index.py` (module
+  `api.index`, variable `app`) pour éviter toute ambiguïté avec d'autres fichiers du
+  repo qui pourraient aussi correspondre aux motifs de détection automatique
+  d'entrypoint de Vercel (ex. `backend/app/main.py`).
+- **`"root": "."` pour le service backend** (et non `"backend/"`) : voir la section
+  "Architecture du déploiement" ci-dessus — c'est ce qui garantit que `ai_engine/`
+  et `scraper/` (paquets frères de `backend/`, pas des sous-dossiers) sont bien
+  inclus dans le build de ce service.
 - La version de Python (3.12, celle utilisée en développement) est fixée via le
   fichier `.python-version` à la racine du repo — c'est le mécanisme actuellement
-  supporté par Vercel. Ne pas la fixer via `functions."api/index.py".runtime` dans
-  `vercel.json` : ce champ attend un identifiant de runtime précis (pas un simple
-  `"python3.12"`) et provoque l'erreur `Function Runtimes must have a valid
-  version` si le format ne correspond pas à ce qu'attend la version courante de
-  Vercel. Si Vercel change encore ce mécanisme, consulte leur documentation à jour
-  et ajuste `.python-version` (ou son équivalent) — le reste de la configuration
-  n'en dépend pas.
+  supporté par Vercel. Ne pas la fixer via un champ `runtime` dans `vercel.json` :
+  cela a provoqué l'erreur `Function Runtimes must have a valid version` lors d'une
+  précédente tentative.
 - `requirements.txt` à la racine du repo est dédié à la fonction serverless : il est
   volontairement plus restreint que `backend/requirements.txt` (pas d'`uvicorn`, pas
   d'`alembic`, pas d'outils de test).
 - `.vercelignore` exclut les dossiers non nécessaires au déploiement (venv,
-  node_modules, cache Graphify, tests, docs annexes...).
+  node_modules, cache Graphify, tests, docs annexes...) ; il s'applique à
+  l'ensemble du repo, donc aux deux services.
+- Si la fonctionnalité "Services" n'est pas disponible sur ton compte/projet
+  Vercel, l'alternative de repli est de créer **deux projets Vercel distincts** à
+  partir du même repo : un projet "frontend only" (racine `frontend/`, build Vite
+  standard) et un projet "backend only" (racine du repo, entrypoint `api/index.py`),
+  puis relier les deux via la variable `VITE_API_BASE_URL` du frontend pointée vers
+  l'URL du projet backend (voir la section sur les limites plus haut — cette
+  variable existe déjà dans le code pour ce cas de figure).
