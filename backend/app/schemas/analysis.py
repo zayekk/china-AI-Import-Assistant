@@ -37,6 +37,21 @@ class AnalyzeImageRequest(BaseModel):
     note: str | None = None
 
 
+class CommercialEstimate(BaseModel):
+    """Estimation commerciale (coût/revente/marge), générée par l'IA en texte libre
+    (devises/unités trop variables pour du numérique strict) ou marquée impossible
+    si le texte source ne contient aucune donnée de prix exploitable."""
+
+    possible: bool = False
+    reason_if_not_possible: str | None = None
+    estimated_purchase_cost: str | None = None
+    suggested_resale_price: str | None = None
+    estimated_gross_margin: str | None = None
+    # Calculé STRICTEMENT côté serveur à partir de "profit_score" (jamais par l'IA), afin que
+    # cette valeur soit toujours cohérente avec "margin_potential" du résumé rapide.
+    commercial_potential: Literal["low", "medium", "high"] | None = None
+
+
 class AIAnalysisResult(BaseModel):
     """Contrat de sortie STRICT renvoyé par le moteur IA (Mistral)."""
 
@@ -64,6 +79,22 @@ class AIAnalysisResult(BaseModel):
     # (voir docs/mobile_architecture.md, section 5).
     mobile_summary: str = ""
 
+    # --- Rapport de décision (voir docs sur le rapport enrichi) ---
+    # Contradictions factuelles détectées par l'IA entre différentes parties du texte source
+    # (titre vs specs, description vs avis, capture vs capture...).
+    critical_alerts: list[str] = Field(default_factory=list)
+    # Synthèse en langage simple générée par l'IA (2-4 phrases).
+    ai_recommendation_summary: str = ""
+    commercial_estimate: CommercialEstimate = Field(default_factory=CommercialEstimate)
+
+    # Les 4 champs suivants sont TOUJOURS calculés côté serveur (jamais par l'IA), à partir des
+    # scores et alertes ci-dessus, pour garantir cohérence et déterminisme (même principe que
+    # "confidence_level"). Voir ai_engine/services/product_analysis_service.py.
+    decision_badge: Literal["recommended", "verify", "caution", "avoid"] = "caution"
+    risk_level: Literal["low", "medium", "high"] = "medium"
+    supplier_reliability: Literal["yes", "medium", "no"] = "medium"
+    margin_potential: Literal["low", "medium", "high"] = "medium"
+
 
 class AnalysisOut(BaseModel):
     id: uuid.UUID
@@ -87,6 +118,14 @@ class AnalysisOut(BaseModel):
     confidence_reasons: list[str] | None = None
     confidence_risks: list[str] | None = None
     mobile_summary: str | None = None
+
+    critical_alerts: list[str] | None = None
+    ai_recommendation_summary: str | None = None
+    commercial_estimate: dict | None = None
+    decision_badge: str | None = None
+    risk_level: str | None = None
+    supplier_reliability: str | None = None
+    margin_potential: str | None = None
 
     model_config = {"from_attributes": True}
 

@@ -11,6 +11,7 @@ L'utilisateur envoie entre 5 et 12 captures d'écran d'une même fiche produit
    déclenche UNE analyse IA consolidée, en réutilisant le même contrat de sortie
    et le même filet de sécurité local que `analyze_product_text()`.
 """
+import copy
 import io
 import logging
 
@@ -204,7 +205,8 @@ def analyze_multi_capture(
         result = _normalize_ai_result(raw_result)
     except MistralAPIError as exc:
         logger.error("Échec analyse IA multi-captures, fallback local activé: %s", exc)
-        result = dict(FALLBACK_RESULT)
+        # deepcopy : voir la note équivalente dans product_analysis_service.py.
+        result = copy.deepcopy(FALLBACK_RESULT)
         result["product_name"] = aggregated_text[:120]
 
     result = _apply_local_safety_net(result, aggregated_text)

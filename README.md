@@ -170,9 +170,29 @@ requises et alternative pour garder le scraping : voir
   "supplier_score": 50,
   "profit_score": 40,
   "final_score": 52,
-  "recommendation": "CAUTION"
+  "recommendation": "CAUTION",
+  "critical_alerts": ["Titre annonçant un pack complet alors que la fiche précise \"coque seule\""],
+  "ai_recommendation_summary": "Achat envisageable avec précautions : seule la coque est incluse, pas la batterie ni le chargeur.",
+  "commercial_estimate": {
+    "possible": true,
+    "reason_if_not_possible": null,
+    "estimated_purchase_cost": "≈ 3-5 ¥",
+    "suggested_resale_price": "≈ 9-12 €",
+    "estimated_gross_margin": "≈ 5-8 €",
+    "commercial_potential": "medium"
+  },
+  "decision_badge": "caution",
+  "risk_level": "medium",
+  "supplier_reliability": "medium",
+  "margin_potential": "medium"
 }
 ```
+
+`critical_alerts`, `commercial_estimate` et `ai_recommendation_summary` sont générés par l'IA
+(dans le même appel Mistral, aucune requête supplémentaire). `decision_badge`, `risk_level`,
+`supplier_reliability` et `margin_potential` sont toujours calculés côté serveur à partir des
+scores ci-dessus (jamais par l'IA), pour garantir un affichage déterministe et cohérent — voir
+`ai_engine/services/product_analysis_service.py`.
 
 ## Ajouter une nouvelle plateforme au scraper
 

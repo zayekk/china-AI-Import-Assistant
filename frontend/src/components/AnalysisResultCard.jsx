@@ -8,10 +8,14 @@ import {
   Sparkles,
   FileSearch,
   Smartphone,
+  Bot,
+  TrendingUp,
 } from "lucide-react";
 import clsx from "clsx";
 import RecommendationBanner from "./RecommendationBanner";
 import ScoreBadge from "./ScoreBadge";
+import QuickSummaryBar from "./QuickSummaryBar";
+import CriticalAlertsBanner from "./CriticalAlertsBanner";
 
 // Bandes de confiance : bornes STRICTEMENT alignées sur `_confidence_level()` côté serveur
 // (backend/ai_engine/services/product_analysis_service.py) : 0-30 / 31-60 / 61-80 / 81-100.
@@ -60,6 +64,13 @@ export default function AnalysisResultCard({ result }) {
     confidence_reasons = [],
     confidence_risks = [],
     mobile_summary,
+    critical_alerts = [],
+    ai_recommendation_summary,
+    commercial_estimate,
+    decision_badge,
+    risk_level,
+    supplier_reliability,
+    margin_potential,
   } = result;
 
   const confidenceBand = getConfidenceBand(confidence_score);
@@ -67,7 +78,18 @@ export default function AnalysisResultCard({ result }) {
   const estimationEntries = Object.entries(ai_estimations || {});
 
   return (
-    <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 space-y-6">
+    <div className="space-y-6">
+      <QuickSummaryBar
+        decisionBadge={decision_badge}
+        finalScore={final_score}
+        riskLevel={risk_level}
+        supplierReliability={supplier_reliability}
+        marginPotential={margin_potential}
+      />
+
+      <CriticalAlertsBanner alerts={critical_alerts} />
+
+      <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 space-y-6">
       {mobile_summary && (
         <div className="flex items-center gap-2 text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
           <Smartphone size={14} className="shrink-0 text-gray-400" />
@@ -89,12 +111,50 @@ export default function AnalysisResultCard({ result }) {
 
       <RecommendationBanner recommendation={recommendation} />
 
+      {ai_recommendation_summary && (
+        <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4">
+          <h3 className="flex items-center gap-2 text-sm font-semibold text-indigo-800 mb-2">
+            <Bot size={16} /> Recommandation IA
+          </h3>
+          <p className="text-sm text-indigo-900">{ai_recommendation_summary}</p>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <ScoreBadge label="Qualité" score={quality_score} />
         <ScoreBadge label="Fournisseur" score={supplier_score} />
         <ScoreBadge label="Marge" score={profit_score} />
         <ScoreBadge label="Score final" score={final_score} />
       </div>
+
+      {commercial_estimate && (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 space-y-2">
+          <h3 className="flex items-center gap-2 text-sm font-semibold text-emerald-800">
+            <TrendingUp size={16} /> Estimation commerciale
+          </h3>
+          <p className="text-xs text-emerald-600 italic">Estimation générée par IA, pas une donnée confirmée</p>
+          {commercial_estimate.possible ? (
+            <dl className="grid sm:grid-cols-3 gap-3 mt-1">
+              <div className="text-sm text-emerald-900">
+                <dt className="text-xs font-medium text-emerald-600">Coût d'achat estimé</dt>
+                <dd>{commercial_estimate.estimated_purchase_cost || "—"}</dd>
+              </div>
+              <div className="text-sm text-emerald-900">
+                <dt className="text-xs font-medium text-emerald-600">Prix de revente conseillé</dt>
+                <dd>{commercial_estimate.suggested_resale_price || "—"}</dd>
+              </div>
+              <div className="text-sm text-emerald-900">
+                <dt className="text-xs font-medium text-emerald-600">Marge brute estimée</dt>
+                <dd>{commercial_estimate.estimated_gross_margin || "—"}</dd>
+              </div>
+            </dl>
+          ) : (
+            <p className="text-sm text-emerald-800 italic">
+              Estimation non disponible : {commercial_estimate.reason_if_not_possible || "données insuffisantes."}
+            </p>
+          )}
+        </div>
+      )}
 
       <div className="grid sm:grid-cols-2 gap-6">
         <div>
@@ -253,6 +313,7 @@ export default function AnalysisResultCard({ result }) {
         ⚠️ Cette analyse est générée par IA et ne garantit jamais un produit à 100%.
         Vérifiez toujours les informations directement auprès du vendeur avant achat.
       </p>
+      </div>
     </div>
   );
 }

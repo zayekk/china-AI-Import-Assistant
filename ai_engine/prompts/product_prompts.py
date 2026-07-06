@@ -47,6 +47,40 @@ Analyser un texte produit (titre, description, variantes) afin de :
 10. Évaluer un score de confiance ("confidence_score") reflétant la fiabilité de TA PROPRE analyse,
     accompagné de justifications ("confidence_reasons") et des risques induits par le manque
     d'information ("confidence_risks").
+11. Détecter les incohérences importantes entre les différentes parties du texte source
+    (titre, description, caractéristiques, avis, texte OCR de plusieurs captures) : voir
+    "RÈGLE SUR LES ALERTES CRITIQUES" ci-dessous.
+12. Rédiger une estimation commerciale (coût, revente, marge) si les données le permettent :
+    voir "RÈGLE SUR L'ESTIMATION COMMERCIALE" ci-dessous.
+13. Rédiger une synthèse de recommandation en 2 à 4 phrases simples ("ai_recommendation_summary"),
+    compréhensible par un débutant, résumant le verdict global et sa raison principale.
+
+RÈGLE SUR LES ALERTES CRITIQUES :
+- "critical_alerts" (liste de strings) : UNIQUEMENT des contradictions factuelles caractérisées
+  entre deux parties du texte source (ex: titre vs description, description vs avis, capture 1
+  vs capture 2). Ne signale QUE des contradictions concrètes et vérifiables, jamais de simples
+  incertitudes (celles-ci vont dans "warnings" ou "missing_information").
+- Exemples de contradictions à détecter : une carte graphique "RTX 5060" annoncée dans le titre
+  mais "HD 7670" mentionnée dans la fiche technique ; "32 Go" de RAM annoncés mais "8 Go" détectés
+  ailleurs dans le texte ; un SSD "1 To" annoncé mais "256 Go" détecté ailleurs ; un produit
+  annoncé "neuf" alors que le texte mentionne des traces d'usure, un reconditionnement ou un
+  état "comme neuf"/"occasion".
+- Si aucune contradiction claire n'est trouvée, retourne une liste vide. N'invente jamais une
+  contradiction à partir d'une simple absence d'information.
+
+RÈGLE SUR L'ESTIMATION COMMERCIALE :
+- "commercial_estimate" est un objet avec les clés : "possible" (booléen), "reason_if_not_possible"
+  (string ou null), "estimated_purchase_cost" (string ou null), "suggested_resale_price"
+  (string ou null), "estimated_gross_margin" (string ou null).
+- Ces estimations sont des chaînes de texte libres (ex: "≈ 15-20 ¥", "environ 8-10 €"), car les
+  devises et unités varient selon la source. N'inclus jamais de fausse précision : reste dans des
+  fourchettes prudentes.
+- "possible" DOIT être false si le texte source ne contient AUCUNE information de prix ou de coût
+  exploitable. Dans ce cas, "reason_if_not_possible" doit expliquer précisément ce qui manque
+  (ex: "Aucun prix d'achat mentionné dans le texte fourni"), et les 3 champs d'estimation
+  doivent rester null.
+- Ne calcule PAS de "commercial_potential" ni de niveau de marge catégoriel : ce champ est
+  déterminé uniquement côté serveur à partir de "profit_score", ne le renvoie jamais.
 
 RÈGLES STRICTES :
 - Ne jamais affirmer qu'un produit est sûr à 100%.
@@ -111,14 +145,23 @@ sans balises markdown, respectant EXACTEMENT ce schéma :
   "missing_information": ["string", "..."],
   "confidence_score": 0,
   "confidence_reasons": ["string", "..."],
-  "confidence_risks": ["string", "..."]
+  "confidence_risks": ["string", "..."],
+  "critical_alerts": ["string", "..."],
+  "commercial_estimate": {
+    "possible": false,
+    "reason_if_not_possible": "string ou null",
+    "estimated_purchase_cost": "string ou null",
+    "suggested_resale_price": "string ou null",
+    "estimated_gross_margin": "string ou null"
+  },
+  "ai_recommendation_summary": "string"
 }
 
 "recommendation" doit valoir exactement "BUY", "AVOID" ou "CAUTION".
 Tous les scores sont des entiers entre 0 et 100.
 "detected_data" et "ai_estimations" sont des objets JSON à clés/valeurs strings (pas de listes,
-pas d'objets imbriqués). "missing_information", "confidence_reasons" et "confidence_risks" sont
-des listes de strings.
+pas d'objets imbriqués). "missing_information", "confidence_reasons", "confidence_risks" et
+"critical_alerts" sont des listes de strings.
 """
 
 SYSTEM_PROMPT_SUPPLIER_ANALYSIS = """Tu es un analyste spécialisé dans l'évaluation de la fiabilité \

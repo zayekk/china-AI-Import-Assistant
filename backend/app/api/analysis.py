@@ -74,6 +74,13 @@ def _persist_analysis(
         confidence_reasons=result.get("confidence_reasons"),
         confidence_risks=result.get("confidence_risks"),
         mobile_summary=result.get("mobile_summary"),
+        critical_alerts=result.get("critical_alerts"),
+        ai_recommendation_summary=result.get("ai_recommendation_summary"),
+        commercial_estimate=result.get("commercial_estimate"),
+        decision_badge=result.get("decision_badge"),
+        risk_level=result.get("risk_level"),
+        supplier_reliability=result.get("supplier_reliability"),
+        margin_potential=result.get("margin_potential"),
         raw_ai_response=result,
     )
     db.add(analysis)

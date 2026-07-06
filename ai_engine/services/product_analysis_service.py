@@ -2,6 +2,7 @@
 Service d'analyse produit : combine le client Mistral, les prompts optimisés
 et une couche de sécurité locale (détection de mots-clés pièges) en complément de l'IA.
 """
+import copy
 import logging
 import re
 
@@ -38,6 +39,24 @@ FALLBACK_RESULT = {
     "confidence_reasons": ["Aucun appel IA n'a pu être effectué."],
     "confidence_risks": ["Impossible de vérifier les informations sans analyse IA complète."],
     "mobile_summary": "CAUTION — 0/100 — Analyse IA indisponible",
+    "critical_alerts": [],
+    "ai_recommendation_summary": (
+        "Analyse IA indisponible : impossible de formuler une recommandation fiable pour le moment."
+    ),
+    "commercial_estimate": {
+        "possible": False,
+        "reason_if_not_possible": "Analyse IA indisponible — aucune estimation ne peut être calculée.",
+        "estimated_purchase_cost": None,
+        "suggested_resale_price": None,
+        "estimated_gross_margin": None,
+        "commercial_potential": "low",
+    },
+    "supplier_reliability": "no",
+    "margin_potential": "low",
+    # decision_badge/risk_level : simples valeurs par défaut, toujours recalculées par
+    # `_apply_local_safety_net()` (appelée juste après dans tous les cas d'usage).
+    "decision_badge": "caution",
+    "risk_level": "high",
 }
 
 
@@ -72,6 +91,103 @@ def _confidence_level(score: int) -> str:
     return "high"
 
 
+def _supplier_reliability(score: int) -> str:
+    """Fiabilité fournisseur Oui/Moyen/Non, mêmes seuils que ScoreBadge.jsx (70/40)."""
+    if score >= 70:
+        return "yes"
+    if score >= 40:
+        return "medium"
+    return "no"
+
+
+def _margin_potential(score: int) -> str:
+    """Potentiel de marge Faible/Moyenne/Forte, mêmes seuils que ScoreBadge.jsx (70/40)."""
+    if score >= 70:
+        return "high"
+    if score >= 40:
+        return "medium"
+    return "low"
+
+
+def _risk_level(warnings: list, confidence_risks: list, critical_alerts: list, recommendation: str) -> str:
+    """
+    Niveau de risque global, déduit localement du nombre de signaux d'alerte déjà
+    calculés (aucun nouvel appel IA). Une recommandation "AVOID" ou la moindre alerte
+    critique (contradiction factuelle avérée) force directement le niveau "high" :
+    plus grave qu'une simple incertitude, ne doit jamais se fondre dans une moyenne.
+    """
+    if recommendation == "AVOID" or critical_alerts:
+        return "high"
+    weighted = len(warnings) + len(confidence_risks)
+    if weighted == 0:
+        return "low"
+    if weighted <= 3:
+        return "medium"
+    return "high"
+
+
+def _decision_badge(final_score: int, recommendation: str, confidence_level: str, critical_alerts: list) -> str:
+    """
+    Badge de décision (🟢/🟡/🟠/🔴 côté frontend), calculé STRICTEMENT côté serveur à partir
+    du score final, de la recommandation IA, du niveau de confiance et des alertes critiques.
+    Jamais délégué à l'IA : garantit un mapping déterministe et testable.
+    """
+    if recommendation == "AVOID" or final_score < 35:
+        return "avoid"
+    if critical_alerts:
+        return "caution"
+    if recommendation == "CAUTION":
+        return "verify" if final_score >= 55 else "caution"
+    # recommendation == "BUY" à partir d'ici
+    if confidence_level == "insufficient":
+        return "verify"
+    if final_score >= 70:
+        return "recommended"
+    if final_score >= 55:
+        return "verify"
+    return "caution"
+
+
+def _normalize_commercial_estimate(raw: dict, margin_potential: str) -> dict:
+    """
+    Normalise l'estimation commerciale fournie par l'IA. Ne fait jamais confiance au booléen
+    "possible" brut : si aucune des 3 estimations concrètes n'est fournie, force possible=false
+    avec une raison explicite plutôt que de risquer un affichage vide mais "possible".
+    "commercial_potential" n'est jamais lu depuis l'IA : toujours injecté depuis
+    "margin_potential" (déjà calculé à partir de profit_score) pour une cohérence garantie
+    avec le résumé rapide.
+    """
+    raw_estimate = raw.get("commercial_estimate")
+    if not isinstance(raw_estimate, dict):
+        raw_estimate = {}
+
+    estimated_purchase_cost = raw_estimate.get("estimated_purchase_cost") or None
+    suggested_resale_price = raw_estimate.get("suggested_resale_price") or None
+    estimated_gross_margin = raw_estimate.get("estimated_gross_margin") or None
+    reason_if_not_possible = raw_estimate.get("reason_if_not_possible") or None
+    possible = bool(raw_estimate.get("possible", False)) and any(
+        (estimated_purchase_cost, suggested_resale_price, estimated_gross_margin)
+    )
+
+    if not possible:
+        estimated_purchase_cost = None
+        suggested_resale_price = None
+        estimated_gross_margin = None
+        reason_if_not_possible = (
+            reason_if_not_possible
+            or "Données de prix/coût insuffisantes dans le texte source pour estimer une marge."
+        )
+
+    return {
+        "possible": possible,
+        "reason_if_not_possible": reason_if_not_possible,
+        "estimated_purchase_cost": estimated_purchase_cost,
+        "suggested_resale_price": suggested_resale_price,
+        "estimated_gross_margin": estimated_gross_margin,
+        "commercial_potential": margin_potential,
+    }
+
+
 def _normalize_ai_result(raw: dict) -> dict:
     """S'assure que le résultat IA respecte bien le contrat de sortie, avec valeurs par défaut sûres."""
     def _clamp_score(value) -> int:
@@ -87,7 +203,12 @@ def _normalize_ai_result(raw: dict) -> dict:
 
     confidence_score = _clamp_score(raw.get("confidence_score", 0))
     final_score = _clamp_score(raw.get("final_score", 0))
+    supplier_score = _clamp_score(raw.get("supplier_score", 0))
+    profit_score = _clamp_score(raw.get("profit_score", 0))
     warnings = list(raw.get("warnings") or [])
+    confidence_level = _confidence_level(confidence_score)
+    critical_alerts = [str(item) for item in (raw.get("critical_alerts") or [])]
+    margin_potential = _margin_potential(profit_score)
 
     result = {
         "product_name": str(raw.get("product_name", "") or ""),
@@ -108,6 +229,11 @@ def _normalize_ai_result(raw: dict) -> dict:
         "confidence_level": _confidence_level(confidence_score),
         "confidence_reasons": list(raw.get("confidence_reasons") or []),
         "confidence_risks": list(raw.get("confidence_risks") or []),
+        "critical_alerts": critical_alerts,
+        "ai_recommendation_summary": str(raw.get("ai_recommendation_summary", "") or "").strip(),
+        "commercial_estimate": _normalize_commercial_estimate(raw, margin_potential),
+        "supplier_reliability": _supplier_reliability(supplier_score),
+        "margin_potential": margin_potential,
     }
 
     # Résumé compact sur une ligne, calculé STRICTEMENT côté serveur (jamais par l'IA),
@@ -119,6 +245,14 @@ def _normalize_ai_result(raw: dict) -> dict:
         f"{recommendation} — {final_score}/100 — "
         f"{warnings[0] if warnings else 'Aucun risque majeur détecté'}"
     )
+
+    # decision_badge et risk_level ne sont PAS calculés ici : ils dépendent de "recommendation"
+    # et "warnings", qui peuvent encore être modifiés par `_apply_local_safety_net()` (ex: un
+    # "BUY" rétrogradé en "CAUTION" suite à un mot-clé piège détecté localement). Les calculer
+    # ici risquerait un badge incohérent avec la recommandation finalement affichée. Voir
+    # `_apply_local_safety_net()`, qui les calcule en tout dernier, sur l'état définitif.
+    result["decision_badge"] = "caution"
+    result["risk_level"] = "medium"
 
     return result
 
@@ -152,6 +286,21 @@ def _apply_local_safety_net(result: dict, raw_text: str) -> dict:
             "Recommandation ajustée automatiquement en CAUTION suite à la détection de mots-clés à risque."
         )
 
+    # Calculés en tout dernier, sur l'état définitif de "recommendation"/"warnings"
+    # (potentiellement modifiés ci-dessus) : voir la note dans `_normalize_ai_result()`.
+    result["risk_level"] = _risk_level(
+        result["warnings"],
+        result["confidence_risks"],
+        result["critical_alerts"],
+        result["recommendation"],
+    )
+    result["decision_badge"] = _decision_badge(
+        result["final_score"],
+        result["recommendation"],
+        result["confidence_level"],
+        result["critical_alerts"],
+    )
+
     return result
 
 
@@ -173,7 +322,11 @@ def analyze_product_text(raw_text: str) -> dict:
 
     except MistralAPIError as exc:
         logger.error("Échec analyse IA, fallback local activé: %s", exc)
-        result = dict(FALLBACK_RESULT)
+        # deepcopy (pas dict()) : FALLBACK_RESULT contient des listes/dicts imbriqués
+        # partagés au niveau du module — un simple dict() superficiel laisserait
+        # `_apply_local_safety_net()` muter (ex: result["warnings"].append(...)) la
+        # constante partagée, corrompant tous les appels de secours suivants.
+        result = copy.deepcopy(FALLBACK_RESULT)
         result["product_name"] = raw_text[:120]
 
     return _apply_local_safety_net(result, raw_text)

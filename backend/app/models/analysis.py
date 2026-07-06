@@ -65,6 +65,17 @@ class Analysis(Base):
     # futur affichage dans une bulle flottante mobile (voir docs/mobile_architecture.md).
     mobile_summary = Column(String(500), nullable=True)
 
+    # Rapport de décision enrichi (voir schémas AIAnalysisResult / CommercialEstimate) :
+    # alertes IA + synthèse IA + estimation commerciale, et badge/risque/fiabilité/marge
+    # toujours calculés côté serveur à partir des scores ci-dessus.
+    critical_alerts = Column(JSON, nullable=True)          # liste de strings
+    ai_recommendation_summary = Column(Text, nullable=True)
+    commercial_estimate = Column(JSON, nullable=True)      # dict CommercialEstimate
+    decision_badge = Column(String(20), nullable=True)
+    risk_level = Column(String(10), nullable=True)
+    supplier_reliability = Column(String(10), nullable=True)
+    margin_potential = Column(String(10), nullable=True)
+
     raw_ai_response = Column(JSON, nullable=True)  # réponse brute pour debug / audit
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
