@@ -134,7 +134,7 @@ docker compose up --build
 ## Déploiement sur Vercel
 
 Le projet inclut une configuration Vercel prête à l'emploi (`vercel.json`,
-`api/index.py`, `requirements.txt` à la racine) : frontend et backend se déploient
+`vercel_app.py`, `requirements.txt` à la racine) : frontend et backend se déploient
 depuis un seul projet Vercel, sans configuration manuelle dans le dashboard.
 
 ⚠️ Le scraping (Playwright) et l'analyse d'image (Tesseract OCR) ne fonctionnent

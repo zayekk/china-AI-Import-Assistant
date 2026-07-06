@@ -12,7 +12,7 @@
     },
     "backend": {
       "root": ".",
-      "entrypoint": "api.index:app"
+      "entrypoint": "vercel_app:app"
     }
   },
   "rewrites": [
