@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     MISTRAL_MODEL: str = "mistral-large-latest"
     MISTRAL_API_URL: str = "https://api.mistral.ai/v1/chat/completions"
     MISTRAL_TIMEOUT_SECONDS: int = 60
+    # API OCR dédiée de Mistral (réutilise MISTRAL_API_KEY) : utilisée uniquement en
+    # repli quand le binaire Tesseract local est absent (voir ai_engine/services/ocr_service.py).
+    MISTRAL_OCR_API_URL: str = "https://api.mistral.ai/v1/ocr"
+    MISTRAL_OCR_MODEL: str = "mistral-ocr-latest"
 
     # --- OCR / Vision ---
     OCR_LANG: str = "chi_sim+eng+fra"

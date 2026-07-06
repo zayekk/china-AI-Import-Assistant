@@ -52,31 +52,39 @@ requête utilisateur
 ## ⚠️ Limites réelles de cet environnement (à lire avant de déployer)
 
 Vercel exécute le backend comme une **fonction serverless** : pas de processus
-persistant, pas de paquets système installables, temps d'exécution limité. Deux
-fonctionnalités du projet ne peuvent donc **pas** fonctionner telles quelles :
+persistant, pas de paquets système installables, temps d'exécution limité. Une
+seule fonctionnalité du projet ne peut donc **pas** fonctionner telle quelle :
 
 | Fonctionnalité | Endpoint(s) | Pourquoi ça ne marche pas sur Vercel | Comportement observé |
 |---|---|---|---|
 | Scraping produit (Taobao/Pinduoduo/1688) | `POST /api/v1/scrape`, `POST /api/v1/analyze-url` | Nécessite un vrai navigateur Chromium (Playwright) : Vercel ne permet pas d'installer/lancer un navigateur headless | Erreur `502` propre (déjà gérée par le code existant, `SpiderError`) |
-| Analyse d'image / multi-captures (OCR) | `POST /api/v1/analyze-image`, `POST /api/v1/analyze-images` | Nécessite le binaire système `tesseract-ocr`, absent de l'environnement Vercel et non installable | Erreur `422` propre (déjà gérée, `OCRError`) |
 
-Ces deux limitations ne cassent pas le reste de l'application (chaque endpoint gère
-son échec proprement), mais ce sont de vraies fonctionnalités en moins. À noter
-aussi : Vercel limite la taille du corps d'une requête (~4,5 Mo sur le plan Hobby),
-ce qui pourrait de toute façon bloquer l'upload de plusieurs captures d'écran avant
-même le problème OCR.
+Cette limitation ne casse pas le reste de l'application (l'endpoint gère son échec
+proprement), mais c'est une vraie fonctionnalité en moins.
 
-**Pour conserver 100 % des fonctionnalités (scraping + OCR inclus)**, héberge le
-backend sur une plateforme qui exécute un vrai conteneur Docker en continu (Render,
-Railway, Fly.io, un VPS...) en réutilisant `docker-compose.yml` /
-`docker/Dockerfile.backend` déjà présents dans ce repo, puis déploie uniquement le
-frontend sur Vercel en définissant `VITE_API_BASE_URL` (voir plus bas) à l'URL de ce
-backend. Le code du frontend supporte déjà les deux topologies sans modification.
+**L'analyse d'image / multi-captures (OCR) fonctionne bien sur Vercel**, malgré
+l'absence du binaire système `tesseract-ocr` : `ai_engine/services/ocr_service.py`
+utilise Tesseract en priorité (chemin local, inchangé), et **bascule
+automatiquement sur l'API OCR dédiée de Mistral** (`mistral-ocr-latest`, réutilise
+`MISTRAL_API_KEY`) dès qu'il détecte que le binaire est absent
+(`pytesseract.TesseractNotFoundError`). Aucune configuration supplémentaire n'est
+nécessaire. À noter tout de même : Vercel limite la taille du corps d'une requête
+(~4,5 Mo sur le plan Hobby), ce qui peut limiter le nombre/la taille des captures
+envoyées en une seule fois pour le scan multi-captures.
+
+**Pour conserver le scraping (Playwright)**, héberge le backend sur une plateforme
+qui exécute un vrai conteneur Docker en continu (Render, Railway, Fly.io, un
+VPS...) en réutilisant `docker-compose.yml` / `docker/Dockerfile.backend` déjà
+présents dans ce repo, puis déploie uniquement le frontend sur Vercel en
+définissant `VITE_API_BASE_URL` (voir plus bas) à l'URL de ce backend. Le code du
+frontend supporte déjà les deux topologies sans modification.
 
 ## Ce qui fonctionne pleinement sur Vercel
 
 - Authentification (inscription, connexion, refresh, profil)
 - Analyse de texte produit (IA Mistral) — `/api/v1/analyze-text`
+- Analyse d'image et multi-captures (OCR, via repli automatique Mistral) —
+  `/api/v1/analyze-image`, `/api/v1/analyze-images`
 - Estimation du coût d'import — `/api/v1/import-estimate`
 - Étapes du scan guidé — `/api/v1/scan-guide/steps`
 - Liste/détail produits, scores — `/api/v1/products`, `/api/v1/score/{id}`
@@ -108,18 +116,30 @@ Dans les réglages du projet Vercel (Settings → Environment Variables) :
 |---|---|---|
 | `DATABASE_URL` | URL de connexion vers ta base PostgreSQL externe | Oui |
 | `SECRET_KEY` | Clé aléatoire forte (`openssl rand -hex 32`) | Oui |
-| `MISTRAL_API_KEY` | Ta clé API Mistral | Oui (sinon `/analyze-text` tombe en mode dégradé) |
+| `MISTRAL_API_KEY` | Ta clé API Mistral | Oui (sinon `/analyze-text` tombe en mode dégradé, et le repli OCR décrit plus haut échoue aussi) |
 | `APP_ENV` | `production` | Recommandé |
 | `DEBUG` | `False` | Recommandé |
 | `CORS_ORIGINS` | Laisser la valeur par défaut : le domaine Vercel courant (`VERCEL_URL`, fourni automatiquement par Vercel) est ajouté automatiquement | Non |
 | `DB_POOL_SIZE`, `DB_MAX_OVERFLOW` | Non nécessaire : réduits automatiquement en environnement serverless (détection de la variable `VERCEL` fournie par la plateforme) | Non |
+| `MISTRAL_OCR_API_URL`, `MISTRAL_OCR_MODEL` | Non nécessaire : valeurs par défaut déjà correctes (réutilisent `MISTRAL_API_KEY`) | Non |
 | `VITE_API_BASE_URL` | Uniquement si le backend est hébergé **ailleurs** que sur Vercel (voir plus haut) | Non |
 
-Les variables liées au scraping/OCR (`OCR_LANG`, `TESSERACT_CMD`, `SCRAPER_*`)
-peuvent rester à leur valeur par défaut : elles n'ont simplement aucun effet tant
-que ces fonctionnalités ne sont pas disponibles sur Vercel.
+Les variables liées au scraping (`SCRAPER_*`) peuvent rester à leur valeur par
+défaut : elles n'ont simplement aucun effet tant que cette fonctionnalité n'est
+pas disponible sur Vercel. `OCR_LANG` et `TESSERACT_CMD` restent utiles pour le
+chemin Tesseract local (Docker/dev), même si Vercel utilise le repli Mistral.
 
 ## Notes techniques
+
+- **Repli OCR automatique (Tesseract → API Mistral).**
+  `ai_engine/services/ocr_service.py::extract_text_from_image_bytes()` essaie
+  toujours Tesseract en premier (comportement local inchangé). Il ne bascule sur
+  `MistralClient.ocr_extract_text()` (`ai_engine/services/mistral_client.py`,
+  endpoint `POST /v1/ocr`, modèle `mistral-ocr-latest`) que sur l'exception précise
+  `pytesseract.TesseractNotFoundError` (binaire absent) — jamais sur une image
+  simplement illisible, pour ne rien changer au comportement historique en local.
+  Aucune nouvelle dépendance : l'appel réutilise `httpx` (déjà utilisé pour les
+  appels Mistral) et `MISTRAL_API_KEY` (déjà configurée).
 
 - **Modèle "Services" Vercel.** `vercel.json` déclare deux services (`frontend`,
   `backend`) plutôt qu'un unique `buildCommand`/`outputDirectory` global : c'est le

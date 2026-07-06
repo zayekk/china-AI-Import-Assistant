@@ -154,7 +154,7 @@ async def analyze_image(
         )
 
     try:
-        extracted_text = extract_text_from_image_bytes(contents)
+        extracted_text = extract_text_from_image_bytes(contents, content_type=file.content_type)
     except OCRError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
 

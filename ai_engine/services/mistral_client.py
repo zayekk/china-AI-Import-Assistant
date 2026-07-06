@@ -1,7 +1,8 @@
 """
 Client HTTP pour l'API Mistral.
-Encapsule les appels chat completions avec gestion d'erreurs et retries.
+Encapsule les appels chat completions et OCR avec gestion d'erreurs et retries.
 """
+import base64
 import json
 import logging
 import time
@@ -30,6 +31,8 @@ class MistralClient:
         self.model = model or settings.MISTRAL_MODEL
         self.api_url = api_url or settings.MISTRAL_API_URL
         self.timeout = timeout or settings.MISTRAL_TIMEOUT_SECONDS
+        self.ocr_api_url = settings.MISTRAL_OCR_API_URL
+        self.ocr_model = settings.MISTRAL_OCR_MODEL
 
     def _headers(self) -> dict[str, str]:
         if not self.api_key:
@@ -100,6 +103,64 @@ class MistralClient:
                 time.sleep(min(2 ** attempt, 8))
 
         raise MistralAPIError(f"Échec de l'appel à Mistral après plusieurs tentatives: {last_error}")
+
+    def ocr_extract_text(
+        self,
+        image_bytes: bytes,
+        content_type: str = "image/png",
+        max_retries: int = 2,
+    ) -> str:
+        """
+        Extrait le texte d'une image via l'API OCR dédiée de Mistral (mistral-ocr-latest).
+        Utilisée en repli par ai_engine/services/ocr_service.py lorsque le binaire
+        Tesseract local n'est pas disponible (ex. environnement serverless comme Vercel).
+        """
+        b64_image = base64.b64encode(image_bytes).decode("utf-8")
+        payload = {
+            "model": self.ocr_model,
+            "document": {
+                "type": "image_url",
+                "image_url": f"data:{content_type};base64,{b64_image}",
+            },
+        }
+
+        last_error: Exception | None = None
+
+        for attempt in range(1, max_retries + 2):
+            try:
+                with httpx.Client(timeout=self.timeout) as client:
+                    response = client.post(
+                        self.ocr_api_url, headers=self._headers(), json=payload
+                    )
+                response.raise_for_status()
+                data = response.json()
+                pages = data.get("pages", [])
+                return "\n".join(page.get("markdown", "") for page in pages).strip()
+
+            except httpx.HTTPStatusError as exc:
+                last_error = exc
+                logger.warning(
+                    "Mistral OCR API HTTP error (attempt %s/%s): %s - %s",
+                    attempt,
+                    max_retries + 1,
+                    exc.response.status_code,
+                    exc.response.text[:500],
+                )
+                if exc.response.status_code in (401, 403):
+                    break
+                time.sleep(min(2 ** attempt, 8))
+
+            except (httpx.RequestError, KeyError, json.JSONDecodeError) as exc:
+                last_error = exc
+                logger.warning(
+                    "Mistral OCR API error (attempt %s/%s): %s",
+                    attempt,
+                    max_retries + 1,
+                    str(exc),
+                )
+                time.sleep(min(2 ** attempt, 8))
+
+        raise MistralAPIError(f"Échec de l'appel OCR à Mistral après plusieurs tentatives: {last_error}")
 
     @staticmethod
     def _safe_json_parse(content: str) -> dict[str, Any]:
