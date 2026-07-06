@@ -118,6 +118,19 @@ que ces fonctionnalités ne sont pas disponibles sur Vercel.
   backend Python dans un même projet. Les champs de build (`installCommand`,
   `buildCommand`, `outputDirectory`) doivent être définis **à l'intérieur** de
   chaque service, plus au niveau racine du fichier.
+- **Fallback SPA (`rewrites` à l'intérieur du service `frontend`).** Le rewrite
+  racine `{"source": "/(.*)", "destination": {"service": "frontend"}}` route
+  seulement le *trafic* vers le service frontend — une fois dedans, ce service gère
+  sa propre table de routes et ne sert que les fichiers statiques réellement
+  présents dans `dist/`. Sans règle supplémentaire, une URL comme `/products` ou
+  `/scan-guide` (routes gérées côté client par React Router) renvoie donc un 404 au
+  rechargement de page, faute de fichier `products` ou `scan-guide` sur le disque.
+  La règle `"rewrites": [{"source": "/(.*)", "destination": "/index.html"}]`
+  **à l'intérieur** de la config du service `frontend` corrige ça : Vercel sert
+  d'abord tout fichier statique qui existe réellement (JS/CSS du bundle, favicon...),
+  et ne retombe sur `index.html` que pour les chemins qui n'ont pas de fichier
+  correspondant — exactement le comportement attendu d'une SPA avec routeur
+  côté client.
 - **`entrypoint: "api.index:app"`** pointe explicitement vers `api/index.py` (module
   `api.index`, variable `app`) pour éviter toute ambiguïté avec d'autres fichiers du
   repo qui pourraient aussi correspondre aux motifs de détection automatique
