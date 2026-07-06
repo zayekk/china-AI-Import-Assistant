@@ -10,9 +10,14 @@ Ajoute à la table `analyses` les colonnes permettant de séparer explicitement 
 - les informations manquantes pour trancher (missing_information)
 - un score de confiance et sa justification (confidence_score, confidence_level,
   confidence_reasons, confidence_risks)
+
+NB : utilise "ADD COLUMN IF NOT EXISTS" (idempotent) plutôt que op.add_column, car
+`backend/app/main.py` crée automatiquement les tables via `Base.metadata.create_all()`
+en environnement de développement (`APP_ENV=development`) — si l'app a un jour tourné
+en pointant vers une base neuve avec ce réglage, ces colonnes existent déjà et un
+op.add_column classique échouerait avec "DuplicateColumn".
 """
 from alembic import op
-import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
@@ -23,20 +28,20 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("analyses", sa.Column("detected_data", sa.JSON(), nullable=True))
-    op.add_column("analyses", sa.Column("ai_estimations", sa.JSON(), nullable=True))
-    op.add_column("analyses", sa.Column("missing_information", sa.JSON(), nullable=True))
-    op.add_column("analyses", sa.Column("confidence_score", sa.String(length=10), nullable=True))
-    op.add_column("analyses", sa.Column("confidence_level", sa.String(length=20), nullable=True))
-    op.add_column("analyses", sa.Column("confidence_reasons", sa.JSON(), nullable=True))
-    op.add_column("analyses", sa.Column("confidence_risks", sa.JSON(), nullable=True))
+    op.execute('ALTER TABLE analyses ADD COLUMN IF NOT EXISTS detected_data JSON')
+    op.execute('ALTER TABLE analyses ADD COLUMN IF NOT EXISTS ai_estimations JSON')
+    op.execute('ALTER TABLE analyses ADD COLUMN IF NOT EXISTS missing_information JSON')
+    op.execute('ALTER TABLE analyses ADD COLUMN IF NOT EXISTS confidence_score VARCHAR(10)')
+    op.execute('ALTER TABLE analyses ADD COLUMN IF NOT EXISTS confidence_level VARCHAR(20)')
+    op.execute('ALTER TABLE analyses ADD COLUMN IF NOT EXISTS confidence_reasons JSON')
+    op.execute('ALTER TABLE analyses ADD COLUMN IF NOT EXISTS confidence_risks JSON')
 
 
 def downgrade() -> None:
-    op.drop_column("analyses", "confidence_risks")
-    op.drop_column("analyses", "confidence_reasons")
-    op.drop_column("analyses", "confidence_level")
-    op.drop_column("analyses", "confidence_score")
-    op.drop_column("analyses", "missing_information")
-    op.drop_column("analyses", "ai_estimations")
-    op.drop_column("analyses", "detected_data")
+    op.execute('ALTER TABLE analyses DROP COLUMN IF EXISTS confidence_risks')
+    op.execute('ALTER TABLE analyses DROP COLUMN IF EXISTS confidence_reasons')
+    op.execute('ALTER TABLE analyses DROP COLUMN IF EXISTS confidence_level')
+    op.execute('ALTER TABLE analyses DROP COLUMN IF EXISTS confidence_score')
+    op.execute('ALTER TABLE analyses DROP COLUMN IF EXISTS missing_information')
+    op.execute('ALTER TABLE analyses DROP COLUMN IF EXISTS ai_estimations')
+    op.execute('ALTER TABLE analyses DROP COLUMN IF EXISTS detected_data')

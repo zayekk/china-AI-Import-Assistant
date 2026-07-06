@@ -18,8 +18,6 @@ Deux ajouts liés à la persistance des analyses :
    interroger/filtrer efficacement en base.
 """
 from alembic import op
-import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
 
 
 # revision identifiers, used by Alembic.
@@ -28,34 +26,42 @@ down_revision = '8f21a4c9d7e3'
 branch_labels = None
 depends_on = None
 
+# NB : toutes les opérations utilisent des variantes "IF NOT EXISTS"/raw SQL (idempotent)
+# plutôt que op.add_column/op.create_table/op.create_index, car `backend/app/main.py`
+# crée automatiquement les tables via `Base.metadata.create_all()` en développement
+# (APP_ENV=development) — voir la note équivalente dans 5c45dddb51e0.
+
 
 def upgrade() -> None:
-    op.add_column("analyses", sa.Column("mobile_summary", sa.String(length=500), nullable=True))
+    op.execute('ALTER TABLE analyses ADD COLUMN IF NOT EXISTS mobile_summary VARCHAR(500)')
 
-    op.create_table(
-        "analysis_captures",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True, nullable=False),
-        sa.Column("analysis_id", postgresql.UUID(as_uuid=True), nullable=False),
-        sa.Column("capture_index", sa.Integer(), nullable=False),
-        sa.Column("filename", sa.String(length=500), nullable=True),
-        sa.Column("category", sa.String(length=50), nullable=True),
-        sa.Column("is_duplicate", sa.Boolean(), nullable=False, server_default=sa.false()),
-        sa.Column("duplicate_of_index", sa.Integer(), nullable=True),
-        sa.Column("ocr_excerpt", sa.Text(), nullable=True),
-        sa.Column("ocr_failed", sa.Boolean(), nullable=False, server_default=sa.false()),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
-        sa.ForeignKeyConstraint(
-            ["analysis_id"], ["analyses.id"], ondelete="CASCADE", name="fk_analysis_captures_analysis_id"
-        ),
+    op.execute(
+        """
+        CREATE TABLE IF NOT EXISTS analysis_captures (
+            id UUID NOT NULL PRIMARY KEY,
+            analysis_id UUID NOT NULL,
+            capture_index INTEGER NOT NULL,
+            filename VARCHAR(500),
+            category VARCHAR(50),
+            is_duplicate BOOLEAN NOT NULL DEFAULT false,
+            duplicate_of_index INTEGER,
+            ocr_excerpt TEXT,
+            ocr_failed BOOLEAN NOT NULL DEFAULT false,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+            CONSTRAINT fk_analysis_captures_analysis_id
+                FOREIGN KEY (analysis_id) REFERENCES analyses(id) ON DELETE CASCADE
+        )
+        """
     )
     # Les requêtes par analyse (récupérer toutes les captures d'une analyse donnée)
     # seront fréquentes -> index dédié sur la clé étrangère.
-    op.create_index(
-        "ix_analysis_captures_analysis_id", "analysis_captures", ["analysis_id"]
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS ix_analysis_captures_analysis_id "
+        "ON analysis_captures (analysis_id)"
     )
 
 
 def downgrade() -> None:
-    op.drop_index("ix_analysis_captures_analysis_id", table_name="analysis_captures")
-    op.drop_table("analysis_captures")
-    op.drop_column("analyses", "mobile_summary")
+    op.execute("DROP INDEX IF EXISTS ix_analysis_captures_analysis_id")
+    op.execute("DROP TABLE IF EXISTS analysis_captures")
+    op.execute("ALTER TABLE analyses DROP COLUMN IF EXISTS mobile_summary")

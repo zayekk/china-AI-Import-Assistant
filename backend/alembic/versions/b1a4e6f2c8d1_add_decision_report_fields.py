@@ -10,9 +10,12 @@ Ajoute à la table `analyses` les colonnes du rapport de décision enrichi :
 - commercial_estimate (coût/revente/marge estimés, ou raison si impossible)
 - decision_badge, risk_level, supplier_reliability, margin_potential (toujours calculés
   côté serveur à partir des scores existants, jamais par l'IA)
+
+NB : utilise "ADD COLUMN IF NOT EXISTS" (idempotent) plutôt que op.add_column — voir la
+note équivalente dans 5c45dddb51e0 (Base.metadata.create_all() en développement peut déjà
+avoir créé ces colonnes avant même que cette migration ne soit appliquée).
 """
 from alembic import op
-import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
@@ -23,20 +26,20 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("analyses", sa.Column("critical_alerts", sa.JSON(), nullable=True))
-    op.add_column("analyses", sa.Column("ai_recommendation_summary", sa.Text(), nullable=True))
-    op.add_column("analyses", sa.Column("commercial_estimate", sa.JSON(), nullable=True))
-    op.add_column("analyses", sa.Column("decision_badge", sa.String(length=20), nullable=True))
-    op.add_column("analyses", sa.Column("risk_level", sa.String(length=10), nullable=True))
-    op.add_column("analyses", sa.Column("supplier_reliability", sa.String(length=10), nullable=True))
-    op.add_column("analyses", sa.Column("margin_potential", sa.String(length=10), nullable=True))
+    op.execute('ALTER TABLE analyses ADD COLUMN IF NOT EXISTS critical_alerts JSON')
+    op.execute('ALTER TABLE analyses ADD COLUMN IF NOT EXISTS ai_recommendation_summary TEXT')
+    op.execute('ALTER TABLE analyses ADD COLUMN IF NOT EXISTS commercial_estimate JSON')
+    op.execute('ALTER TABLE analyses ADD COLUMN IF NOT EXISTS decision_badge VARCHAR(20)')
+    op.execute('ALTER TABLE analyses ADD COLUMN IF NOT EXISTS risk_level VARCHAR(10)')
+    op.execute('ALTER TABLE analyses ADD COLUMN IF NOT EXISTS supplier_reliability VARCHAR(10)')
+    op.execute('ALTER TABLE analyses ADD COLUMN IF NOT EXISTS margin_potential VARCHAR(10)')
 
 
 def downgrade() -> None:
-    op.drop_column("analyses", "margin_potential")
-    op.drop_column("analyses", "supplier_reliability")
-    op.drop_column("analyses", "risk_level")
-    op.drop_column("analyses", "decision_badge")
-    op.drop_column("analyses", "commercial_estimate")
-    op.drop_column("analyses", "ai_recommendation_summary")
-    op.drop_column("analyses", "critical_alerts")
+    op.execute('ALTER TABLE analyses DROP COLUMN IF EXISTS margin_potential')
+    op.execute('ALTER TABLE analyses DROP COLUMN IF EXISTS supplier_reliability')
+    op.execute('ALTER TABLE analyses DROP COLUMN IF EXISTS risk_level')
+    op.execute('ALTER TABLE analyses DROP COLUMN IF EXISTS decision_badge')
+    op.execute('ALTER TABLE analyses DROP COLUMN IF EXISTS commercial_estimate')
+    op.execute('ALTER TABLE analyses DROP COLUMN IF EXISTS ai_recommendation_summary')
+    op.execute('ALTER TABLE analyses DROP COLUMN IF EXISTS critical_alerts')
