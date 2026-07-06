@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(graphify query *)",
+      "Bash(python3 -c ' *)",
+      "Bash(graphify update *)",
+      "Bash(alembic history *)",
+      "Bash(alembic upgrade *)",
+      "Bash(pg_isready -h localhost -p 5432)",
+      "Bash(echo \"exit code: $?\")"
+    ]
+  }
+}
