@@ -97,11 +97,15 @@ que ces fonctionnalités ne sont pas disponibles sur Vercel.
 
 ## Notes techniques
 
-- `vercel.json` fixe `functions."api/index.py".runtime` à `python3.12` (version
-  utilisée en développement). Si Vercel refuse cette syntaxe au moment de ton
-  déploiement (le format exact peut évoluer côté Vercel), consulte leur
-  documentation à jour et adapte ce champ — le reste de la configuration n'en
-  dépend pas.
+- La version de Python (3.12, celle utilisée en développement) est fixée via le
+  fichier `.python-version` à la racine du repo — c'est le mécanisme actuellement
+  supporté par Vercel. Ne pas la fixer via `functions."api/index.py".runtime` dans
+  `vercel.json` : ce champ attend un identifiant de runtime précis (pas un simple
+  `"python3.12"`) et provoque l'erreur `Function Runtimes must have a valid
+  version` si le format ne correspond pas à ce qu'attend la version courante de
+  Vercel. Si Vercel change encore ce mécanisme, consulte leur documentation à jour
+  et ajuste `.python-version` (ou son équivalent) — le reste de la configuration
+  n'en dépend pas.
 - `requirements.txt` à la racine du repo est dédié à la fonction serverless : il est
   volontairement plus restreint que `backend/requirements.txt` (pas d'`uvicorn`, pas
   d'`alembic`, pas d'outils de test).
