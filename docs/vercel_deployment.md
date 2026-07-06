@@ -68,9 +68,17 @@ utilise Tesseract en priorité (chemin local, inchangé), et **bascule
 automatiquement sur l'API OCR dédiée de Mistral** (`mistral-ocr-latest`, réutilise
 `MISTRAL_API_KEY`) dès qu'il détecte que le binaire est absent
 (`pytesseract.TesseractNotFoundError`). Aucune configuration supplémentaire n'est
-nécessaire. À noter tout de même : Vercel limite la taille du corps d'une requête
-(~4,5 Mo sur le plan Hobby), ce qui peut limiter le nombre/la taille des captures
-envoyées en une seule fois pour le scan multi-captures.
+nécessaire.
+
+Vercel limite la taille du corps d'une requête à **4,5 Mo, fixe quel que soit le
+plan** — une capture d'écran Android en pleine résolution peut à elle seule
+approcher cette limite, et un lot de 5 à 12 la dépasserait largement. Le frontend
+compresse donc automatiquement chaque image côté client avant l'upload
+(`frontend/src/utils/imageCompression.js` : redimensionnement + réencodage JPEG
+via l'API Canvas du navigateur, cible adaptative au nombre d'images du lot) —
+aucune capture n'est jamais envoyée telle quelle. Si une image reste trop
+volumineuse même après compression maximale (cas très rare en pratique), un
+message clair est affiché à l'utilisateur plutôt que de risquer un 413.
 
 **Pour conserver le scraping (Playwright)**, héberge le backend sur une plateforme
 qui exécute un vrai conteneur Docker en continu (Render, Railway, Fly.io, un
@@ -131,6 +139,15 @@ chemin Tesseract local (Docker/dev), même si Vercel utilise le repli Mistral.
 
 ## Notes techniques
 
+- **Compression d'image côté client (`frontend/src/utils/imageCompression.js`).**
+  Redimensionne (plafond 1920px sur le plus grand côté, jamais sous 1000px) et
+  réencode en JPEG via l'API Canvas native du navigateur — aucune dépendance
+  tierce. La qualité JPEG est réduite en priorité (les artefacts de compression
+  gênent peu l'OCR, y compris pour du chinois) ; la résolution n'est réduite
+  qu'en dernier recours. La cible par fichier s'adapte au nombre d'images du lot
+  (`compressBatch`) pour rester sous un budget total sûr, avec un garde-fou final
+  avant l'envoi réseau (`assertBatchSizeIsSafe` pour le scan guidé, vérification
+  intégrée à `compressBatch` pour le scan multi-captures libre).
 - **Repli OCR automatique (Tesseract → API Mistral).**
   `ai_engine/services/ocr_service.py::extract_text_from_image_bytes()` essaie
   toujours Tesseract en premier (comportement local inchangé). Il ne bascule sur

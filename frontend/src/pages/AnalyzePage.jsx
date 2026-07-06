@@ -4,6 +4,12 @@ import clsx from "clsx";
 import AnalysisResultCard from "../components/AnalysisResultCard";
 import CaptureBreakdown from "../components/CaptureBreakdown";
 import { analyzeText, analyzeImage, analyzeImages, analyzeUrl } from "../services/analysisService";
+import {
+  compressImageIfNeeded,
+  compressBatch,
+  formatBytes,
+  SINGLE_IMAGE_TARGET_BYTES,
+} from "../utils/imageCompression";
 
 const TABS = [
   { id: "text", label: "Texte", icon: Type },
@@ -28,21 +34,55 @@ export default function AnalyzePage() {
   const [error, setError] = useState(null);
   const [result, setResult] = useState(null);
 
-  const handleImageChange = (e) => {
+  // Compression côté client avant upload (évite les 413 sur mobile — voir
+  // frontend/src/utils/imageCompression.js pour le détail de la stratégie).
+  const [compressingImage, setCompressingImage] = useState(false);
+  const [compressingMulti, setCompressingMulti] = useState(false);
+  const [multiCompressProgress, setMultiCompressProgress] = useState({ done: 0, total: 0 });
+
+  const handleImageChange = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    setImageFile(file);
-    setImagePreview(URL.createObjectURL(file));
+    setError(null);
+    setImageFile(null);
+    setImagePreview(null);
+    setCompressingImage(true);
+    try {
+      const { file: compressed } = await compressImageIfNeeded(file, SINGLE_IMAGE_TARGET_BYTES);
+      setImageFile(compressed);
+      setImagePreview(URL.createObjectURL(compressed));
+    } catch (err) {
+      setError(err.message || "Impossible de traiter cette image.");
+    } finally {
+      setCompressingImage(false);
+    }
   };
 
-  const handleMultiFilesChange = (e) => {
+  const handleMultiFilesChange = async (e) => {
     const files = Array.from(e.target.files || []);
-    setMultiFiles(files);
-    setMultiPreviews(files.map((file) => URL.createObjectURL(file)));
+    if (files.length === 0) return;
+    setError(null);
+    setMultiFiles([]);
+    setMultiPreviews([]);
+    setCompressingMulti(true);
+    setMultiCompressProgress({ done: 0, total: files.length });
+    try {
+      const results = await compressBatch(files, (done, total) =>
+        setMultiCompressProgress({ done, total })
+      );
+      const compressedFiles = results.map((r) => r.file);
+      setMultiFiles(compressedFiles);
+      setMultiPreviews(compressedFiles.map((file) => URL.createObjectURL(file)));
+    } catch (err) {
+      setError(err.message || "Impossible de traiter une ou plusieurs images.");
+    } finally {
+      setCompressingMulti(false);
+    }
   };
 
   const multiCount = multiFiles.length;
   const multiCountValid = multiCount >= MULTI_CAPTURE_MIN && multiCount <= MULTI_CAPTURE_MAX;
+  const multiTotalSize = multiFiles.reduce((sum, f) => sum + f.size, 0);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -141,14 +181,27 @@ export default function AnalyzePage() {
                 type="file"
                 accept="image/jpeg,image/png,image/webp"
                 onChange={handleImageChange}
-                className="block w-full text-sm text-gray-600 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-brand-50 file:text-brand-700 file:font-medium hover:file:bg-brand-100"
+                disabled={compressingImage}
+                className="block w-full text-sm text-gray-600 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-brand-50 file:text-brand-700 file:font-medium hover:file:bg-brand-100 disabled:opacity-60"
               />
+              {compressingImage && (
+                <p className="mt-2 flex items-center gap-2 text-sm text-gray-500">
+                  <Loader2 size={14} className="animate-spin" /> Compression de l'image en cours...
+                </p>
+              )}
               {imagePreview && (
-                <img
-                  src={imagePreview}
-                  alt="Aperçu"
-                  className="mt-4 max-h-64 rounded-xl border border-gray-200 object-contain"
-                />
+                <>
+                  <img
+                    src={imagePreview}
+                    alt="Aperçu"
+                    className="mt-4 max-h-64 rounded-xl border border-gray-200 object-contain"
+                  />
+                  {imageFile && (
+                    <p className="mt-1.5 text-xs text-gray-400">
+                      Taille après compression : {formatBytes(imageFile.size)}
+                    </p>
+                  )}
+                </>
               )}
             </div>
           )}
@@ -160,30 +213,44 @@ export default function AnalyzePage() {
                 multiple
                 accept="image/jpeg,image/png,image/webp"
                 onChange={handleMultiFilesChange}
-                className="block w-full text-sm text-gray-600 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-brand-50 file:text-brand-700 file:font-medium hover:file:bg-brand-100"
+                disabled={compressingMulti}
+                className="block w-full text-sm text-gray-600 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-brand-50 file:text-brand-700 file:font-medium hover:file:bg-brand-100 disabled:opacity-60"
               />
 
-              <p
-                className={clsx(
-                  "mt-2 text-sm",
-                  multiCount === 0
-                    ? "text-gray-500"
-                    : multiCountValid
-                    ? "text-green-600"
-                    : "text-red-600"
-                )}
-              >
-                Minimum {MULTI_CAPTURE_MIN}, recommandé {MULTI_CAPTURE_RECOMMENDED}, maximum{" "}
-                {MULTI_CAPTURE_MAX} — vous en avez sélectionné {multiCount}.
-                {multiCount > 0 && !multiCountValid && (
-                  <>
-                    {" "}
-                    {multiCount < MULTI_CAPTURE_MIN
-                      ? `Ajoutez encore au moins ${MULTI_CAPTURE_MIN - multiCount} capture(s).`
-                      : `Retirez au moins ${multiCount - MULTI_CAPTURE_MAX} capture(s).`}
-                  </>
-                )}
-              </p>
+              {compressingMulti && (
+                <p className="mt-2 flex items-center gap-2 text-sm text-gray-500">
+                  <Loader2 size={14} className="animate-spin" />
+                  Compression des images en cours... ({multiCompressProgress.done}/
+                  {multiCompressProgress.total})
+                </p>
+              )}
+
+              {!compressingMulti && (
+                <p
+                  className={clsx(
+                    "mt-2 text-sm",
+                    multiCount === 0
+                      ? "text-gray-500"
+                      : multiCountValid
+                      ? "text-green-600"
+                      : "text-red-600"
+                  )}
+                >
+                  Minimum {MULTI_CAPTURE_MIN}, recommandé {MULTI_CAPTURE_RECOMMENDED}, maximum{" "}
+                  {MULTI_CAPTURE_MAX} — vous en avez sélectionné {multiCount}.
+                  {multiCount > 0 && !multiCountValid && (
+                    <>
+                      {" "}
+                      {multiCount < MULTI_CAPTURE_MIN
+                        ? `Ajoutez encore au moins ${MULTI_CAPTURE_MIN - multiCount} capture(s).`
+                        : `Retirez au moins ${multiCount - MULTI_CAPTURE_MAX} capture(s).`}
+                    </>
+                  )}
+                  {multiCount > 0 && (
+                    <span className="text-gray-400"> Taille totale après compression : {formatBytes(multiTotalSize)}.</span>
+                  )}
+                </p>
+              )}
 
               {multiPreviews.length > 0 && (
                 <div className="mt-4 grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-3">
@@ -206,7 +273,12 @@ export default function AnalyzePage() {
 
           <button
             type="submit"
-            disabled={loading || (activeTab === "multi" && !multiCountValid)}
+            disabled={
+              loading ||
+              compressingImage ||
+              compressingMulti ||
+              (activeTab === "multi" && !multiCountValid)
+            }
             className="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-brand-600 hover:bg-brand-700 disabled:opacity-60 text-white font-medium px-6 py-3 rounded-xl transition-colors"
           >
             {loading && <Loader2 size={16} className="animate-spin" />}

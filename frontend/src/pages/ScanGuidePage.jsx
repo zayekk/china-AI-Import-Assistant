@@ -13,6 +13,11 @@ import AnalysisResultCard from "../components/AnalysisResultCard";
 import CaptureBreakdown from "../components/CaptureBreakdown";
 import { getScanGuideSteps } from "../services/scanGuideService";
 import { analyzeImagesGuided } from "../services/analysisService";
+import {
+  compressImageIfNeeded,
+  assertBatchSizeIsSafe,
+  formatBytes,
+} from "../utils/imageCompression";
 
 const CATEGORY_LABELS = {
   main_page: "Page principale",
@@ -32,6 +37,7 @@ export default function ScanGuidePage() {
   const [capturesByStep, setCapturesByStep] = useState({});
   const [pendingFile, setPendingFile] = useState(null);
   const [pendingPreview, setPendingPreview] = useState(null);
+  const [compressingStep, setCompressingStep] = useState(false);
 
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState(null);
@@ -88,11 +94,22 @@ export default function ScanGuidePage() {
     setPendingPreview(null);
   };
 
-  const handleFileSelect = (e) => {
+  const handleFileSelect = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    setPendingFile(file);
-    setPendingPreview(URL.createObjectURL(file));
+    setError(null);
+    setCompressingStep(true);
+    try {
+      // Compression côté client avant tout (évite les 413 sur mobile — voir
+      // frontend/src/utils/imageCompression.js pour le détail de la stratégie).
+      const { file: compressed } = await compressImageIfNeeded(file);
+      setPendingFile(compressed);
+      setPendingPreview(URL.createObjectURL(compressed));
+    } catch (err) {
+      setError(err.message || "Impossible de traiter cette image.");
+    } finally {
+      setCompressingStep(false);
+    }
   };
 
   const handleCaptureStep = () => {
@@ -132,6 +149,10 @@ export default function ScanGuidePage() {
       const ordered = steps.map((s) => capturesByStep[s.step]).filter(Boolean);
       const files = ordered.map((c) => c.file);
       const categories = ordered.map((c) => c.category);
+      // Garde-fou final : chaque capture a déjà été compressée individuellement
+      // à son étape, mais on revérifie le total avant l'envoi réseau plutôt que
+      // de laisser la plateforme renvoyer un 413 brut.
+      assertBatchSizeIsSafe(files);
       const data = await analyzeImagesGuided(files, categories);
       setResult(data);
     } catch (err) {
@@ -218,15 +239,29 @@ export default function ScanGuidePage() {
                   type="file"
                   accept="image/jpeg,image/png,image/webp"
                   onChange={handleFileSelect}
-                  className="block w-full text-sm text-gray-600 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-brand-50 file:text-brand-700 file:font-medium hover:file:bg-brand-100"
+                  disabled={compressingStep}
+                  className="block w-full text-sm text-gray-600 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-brand-50 file:text-brand-700 file:font-medium hover:file:bg-brand-100 disabled:opacity-60"
                 />
 
+                {compressingStep && (
+                  <p className="flex items-center gap-2 text-sm text-gray-500">
+                    <Loader2 size={14} className="animate-spin" /> Compression de l'image en cours...
+                  </p>
+                )}
+
                 {pendingPreview && (
-                  <img
-                    src={pendingPreview}
-                    alt={`Aperçu étape ${currentStep.step}`}
-                    className="max-h-64 rounded-xl border border-gray-200 object-contain"
-                  />
+                  <>
+                    <img
+                      src={pendingPreview}
+                      alt={`Aperçu étape ${currentStep.step}`}
+                      className="max-h-64 rounded-xl border border-gray-200 object-contain"
+                    />
+                    {pendingFile && (
+                      <p className="text-xs text-gray-400">
+                        Taille après compression : {formatBytes(pendingFile.size)}
+                      </p>
+                    )}
+                  </>
                 )}
 
                 <div className="flex flex-wrap items-center gap-3 pt-2">
@@ -242,7 +277,7 @@ export default function ScanGuidePage() {
                   <button
                     type="button"
                     onClick={handleCaptureStep}
-                    disabled={!pendingFile}
+                    disabled={!pendingFile || compressingStep}
                     className="inline-flex items-center gap-2 rounded-xl bg-brand-600 hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium px-5 py-2.5 text-sm transition-colors"
                   >
                     <CheckCircle2 size={16} /> Capturer cette étape
@@ -335,7 +370,9 @@ export default function ScanGuidePage() {
                       <p className="text-xs font-semibold text-gray-700">
                         Étape {step.step} {step.required && <span className="text-red-600">*</span>}
                       </p>
-                      <p className="text-xs text-gray-500 truncate">{CATEGORY_LABELS[step.category]}</p>
+                      <p className="text-xs text-gray-500 truncate">
+                        {CATEGORY_LABELS[step.category]} · {formatBytes(capture.file.size)}
+                      </p>
                     </div>
                     <button
                       type="button"
