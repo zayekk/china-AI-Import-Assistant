@@ -1,0 +1,23 @@
+# Environnements / dépendances locales (réinstallées par Vercel depuis requirements.txt / package.json)
+backend/venv/
+frontend/node_modules/
+__pycache__/
+*.pyc
+
+# Cache Graphify (régénérable via `graphify update .`, inutile au déploiement)
+graphify-out/
+
+# Outillage de dev / CI non nécessaire au déploiement
+.claude/
+tour-de-controle/
+tests/
+docker/
+database/
+.vscode/
+Makefile
+pytest.ini
+
+# Résultats de tests locaux (Playwright, pytest)
+backend/test-results/
+backend/playwright-report/
+.pytest_cache/

@@ -1,0 +1,39 @@
+# Dépendances Python pour la fonction serverless Vercel (api/index.py).
+# Distinct de backend/requirements.txt (utilisé pour Docker/dev local, qui inclut
+# en plus uvicorn, alembic et les outils de test/dev non nécessaires ici).
+#
+# Playwright et pytesseract sont inclus pour que les imports du code existant
+# réussissent (voir api/index.py) ; leurs fonctionnalités sous-jacentes (navigateur
+# headless, binaire Tesseract) ne sont pas disponibles sur Vercel — voir
+# docs/vercel_deployment.md.
+
+# ===== Backend Framework =====
+fastapi==0.111.0
+python-multipart==0.0.9
+
+# ===== Base de données =====
+sqlalchemy==2.0.30
+psycopg2-binary==2.9.9
+
+# ===== Validation / Settings =====
+pydantic==2.7.4
+pydantic-settings==2.3.4
+email-validator==2.1.1
+
+# ===== Sécurité / Auth =====
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+bcrypt==4.1.3
+
+# ===== HTTP Client (Mistral API) =====
+httpx==0.27.0
+
+# ===== Scraping (bindings uniquement, pas de navigateur sur Vercel) =====
+playwright==1.44.0
+beautifulsoup4==4.12.3
+lxml==5.2.2
+
+# ===== OCR / Vision (binaire Tesseract non disponible sur Vercel) =====
+pytesseract==0.3.10
+Pillow==10.3.0
+imagehash==4.3.1

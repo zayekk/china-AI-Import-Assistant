@@ -2,6 +2,7 @@
 Configuration centrale de l'application.
 Charge les variables d'environnement via pydantic-settings.
 """
+import os
 from functools import lru_cache
 from typing import List
 
@@ -26,6 +27,12 @@ class Settings(BaseSettings):
         "postgresql+psycopg2://china_ai_user:china_ai_password@localhost:5432/china_ai_db"
     )
     DATABASE_ECHO: bool = False
+    # Taille du pool de connexions SQLAlchemy. Sur un serveur classique (Docker/VPS),
+    # les valeurs par défaut conviennent. En environnement serverless (Vercel), le
+    # pool est automatiquement réduit (voir database.py) pour éviter d'épuiser les
+    # connexions disponibles côté PostgreSQL managé.
+    DB_POOL_SIZE: int = 10
+    DB_MAX_OVERFLOW: int = 20
 
     # --- CORS ---
     CORS_ORIGINS: List[str] = [
@@ -77,7 +84,18 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     """Retourne une instance unique (mise en cache) des settings."""
-    return Settings()
+    s = Settings()
+
+    # Sur Vercel, la plateforme expose automatiquement VERCEL_URL (domaine du
+    # déploiement courant, y compris pour les previews). On l'ajoute aux origines
+    # CORS autorisées sans configuration manuelle supplémentaire.
+    vercel_url = os.environ.get("VERCEL_URL")
+    if vercel_url:
+        origin = f"https://{vercel_url}"
+        if origin not in s.CORS_ORIGINS:
+            s.CORS_ORIGINS = [*s.CORS_ORIGINS, origin]
+
+    return s
 
 
 settings = get_settings()

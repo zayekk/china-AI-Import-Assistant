@@ -131,6 +131,19 @@ docker compose up --build
 - Backend API : `http://localhost:8000`
 - Documentation API : `http://localhost:8000/docs`
 
+## Déploiement sur Vercel
+
+Le projet inclut une configuration Vercel prête à l'emploi (`vercel.json`,
+`api/index.py`, `requirements.txt` à la racine) : frontend et backend se déploient
+depuis un seul projet Vercel, sans configuration manuelle dans le dashboard.
+
+⚠️ Le scraping (Playwright) et l'analyse d'image (Tesseract OCR) ne fonctionnent
+pas sur l'environnement serverless de Vercel (limitation de la plateforme, pas du
+code) — le reste de l'application (auth, analyse texte, estimation import, scan
+guidé, produits/scores) fonctionne pleinement. Détails, variables d'environnement
+requises et alternative pour garder 100 % des fonctionnalités : voir
+[docs/vercel_deployment.md](docs/vercel_deployment.md).
+
 ## Endpoints API principaux
 
 | Méthode | Endpoint                  | Description                          |

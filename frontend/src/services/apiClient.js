@@ -4,8 +4,12 @@
  */
 import axios from "axios";
 
+// En déploiement "tout-en-un" (frontend + API sur le même domaine Vercel), l'URL
+// relative /api/v1 suffit. Si le backend est hébergé séparément (ex: Docker sur
+// Render/Railway/Fly.io pour conserver le scraping/OCR complets), définir
+// VITE_API_BASE_URL au build pour pointer vers son URL absolue.
 const apiClient = axios.create({
-  baseURL: "/api/v1",
+  baseURL: import.meta.env.VITE_API_BASE_URL || "/api/v1",
   headers: {
     "Content-Type": "application/json",
   },
