@@ -13,6 +13,7 @@ sys.path.append(str(Path(__file__).resolve().parents[2]))
 from ai_engine.services.mistral_client import MistralAPIError
 from ai_engine.services.product_analysis_service import (
     _decision_badge,
+    _import_decision,
     _margin_potential,
     _normalize_commercial_estimate,
     _risk_level,
@@ -141,37 +142,105 @@ def test_decision_badge_caution_low_score_is_caution():
 
 
 # ---------------------------------------------------------------------------
-# _normalize_commercial_estimate()
+# _normalize_commercial_estimate() : l'IA ne fournit que 4 montants "input" en euros ;
+# toute l'arithmétique dérivée (coût rendu, bénéfice, marge %, FCFA) est calculée ici.
 # ---------------------------------------------------------------------------
 
 
-def test_commercial_estimate_possible_with_data_is_kept():
+def test_commercial_estimate_full_data_computes_financial_breakdown():
     raw = {
         "commercial_estimate": {
             "possible": True,
-            "estimated_purchase_cost": "≈ 15 ¥",
-            "suggested_resale_price": "≈ 25 €",
-            "estimated_gross_margin": "≈ 10 €",
+            "purchase_price_eur": 10.0,
+            "estimated_transport_eur": 2.0,
+            "estimated_customs_eur": 1.0,
+            "suggested_resale_price_eur": 26.0,
         }
     }
-    result = _normalize_commercial_estimate(raw, margin_potential="medium")
+    result, margin_potential = _normalize_commercial_estimate(raw, profit_score=50, language="fr")
     assert result["possible"] is True
-    assert result["estimated_purchase_cost"] == "≈ 15 ¥"
-    assert result["commercial_potential"] == "medium"
+    assert result["landed_cost_eur"] == 13.0
+    assert result["estimated_profit_eur"] == 13.0
+    # marge = 13/26*100 = 50% -> largement au-dessus du seuil ACHETER (30%) -> "high"
+    assert result["margin_percentage"] == 50.0
+    assert margin_potential == "high"
+    assert result["commercial_potential"] == "high"
+    # conversion FCFA au taux fixe réel (655.957) : 13 * 655.957 ≈ 8527
+    assert result["estimated_profit_fcfa"] == round(13.0 * 655.957)
 
 
-def test_commercial_estimate_possible_true_but_no_data_is_forced_false():
-    raw = {"commercial_estimate": {"possible": True}}
-    result = _normalize_commercial_estimate(raw, margin_potential="low")
+def test_commercial_estimate_possible_without_resale_price_skips_profit_only():
+    """possible=True dès que purchase_price_eur est fourni ; sans prix de revente, le coût
+    rendu reste calculable mais le bénéfice/marge/FCFA restent None (pas de division par zéro)."""
+    raw = {"commercial_estimate": {"possible": True, "purchase_price_eur": 10.0}}
+    result, _ = _normalize_commercial_estimate(raw, profit_score=50, language="fr")
+    assert result["possible"] is True
+    assert result["landed_cost_eur"] == 10.0
+    assert result["estimated_profit_eur"] is None
+    assert result["margin_percentage"] is None
+    assert result["estimated_profit_fcfa"] is None
+
+
+def test_commercial_estimate_possible_true_but_no_purchase_price_is_forced_false():
+    raw = {"commercial_estimate": {"possible": True, "suggested_resale_price_eur": 20.0}}
+    result, _ = _normalize_commercial_estimate(raw, profit_score=50, language="fr")
     assert result["possible"] is False
     assert result["reason_if_not_possible"]
-    assert result["estimated_purchase_cost"] is None
+    assert result["landed_cost_eur"] is None
 
 
 def test_commercial_estimate_missing_key_defaults_to_not_possible():
-    result = _normalize_commercial_estimate({}, margin_potential="low")
+    result, margin_potential = _normalize_commercial_estimate({}, profit_score=20, language="fr")
     assert result["possible"] is False
-    assert result["commercial_potential"] == "low"
+    assert margin_potential == "low"  # repli sur profit_score (mêmes seuils que ScoreBadge.jsx)
+
+
+def test_commercial_estimate_falls_back_to_profit_score_when_margin_not_computable():
+    """Sans marge concrète calculable, margin_potential retombe sur profit_score (70/40)."""
+    _, margin_potential = _normalize_commercial_estimate({}, profit_score=75, language="fr")
+    assert margin_potential == "high"
+
+
+def test_commercial_estimate_not_possible_reason_is_localized():
+    result_fr, _ = _normalize_commercial_estimate({}, profit_score=0, language="fr")
+    result_en, _ = _normalize_commercial_estimate({}, profit_score=0, language="en")
+    assert result_fr["reason_if_not_possible"] != result_en["reason_if_not_possible"]
+    assert "insuffisantes" in result_fr["reason_if_not_possible"]
+    assert "Insufficient" in result_en["reason_if_not_possible"]
+
+
+# ---------------------------------------------------------------------------
+# _import_decision() : carte "Décision Import" dédiée, calculée côté serveur en agrégeant
+# des signaux déjà produits (aucun appel IA supplémentaire).
+# ---------------------------------------------------------------------------
+
+
+def test_import_decision_avoid_badge_forces_avoid():
+    assert _import_decision("avoid", "high", 5, []) == "avoid"
+
+
+def test_import_decision_critical_alerts_force_avoid_even_if_recommended():
+    assert _import_decision("recommended", "high", 5, ["contradiction"]) == "avoid"
+
+
+def test_import_decision_recommended_high_margin_good_rating_is_import():
+    assert _import_decision("recommended", "high", 4, []) == "import"
+
+
+def test_import_decision_recommended_low_margin_is_study():
+    assert _import_decision("recommended", "low", 5, []) == "study"
+
+
+def test_import_decision_verify_high_margin_high_rating_is_import():
+    assert _import_decision("verify", "high", 4, []) == "import"
+
+
+def test_import_decision_verify_medium_margin_is_study():
+    assert _import_decision("verify", "medium", 3, []) == "study"
+
+
+def test_import_decision_caution_is_study():
+    assert _import_decision("caution", "high", 5, []) == "study"
 
 
 # ---------------------------------------------------------------------------
@@ -222,7 +291,7 @@ def test_badge_reflects_downgrade_from_local_trap_keyword_safety_net():
 
 def test_fallback_result_does_not_leak_warnings_across_calls():
     """
-    Reproduit une régression potentielle : `dict(FALLBACK_RESULT)` est une copie superficielle,
+    Reproduit une régression potentielle : `dict(_fallback_result(...))` serait une copie superficielle,
     donc muter result["warnings"] (ajout d'un mot-clé piège) muterait la constante partagée du
     module, faisant grossir indéfiniment les warnings de TOUS les appels de secours suivants.
     Deux appels successifs en échec IA doivent produire le même nombre de warnings.
@@ -233,3 +302,57 @@ def test_fallback_result_does_not_leak_warnings_across_calls():
         second = analyze_product_text("Cooltech CP25 protective case only")
 
     assert len(second["warnings"]) == len(first["warnings"])
+
+
+# ---------------------------------------------------------------------------
+# Internationalisation (v1.1) : la langue est transmise de bout en bout, y compris pour
+# le filet de sécurité local et le repli en cas d'échec IA (jamais un mélange de langues).
+# ---------------------------------------------------------------------------
+
+
+def test_language_is_echoed_back_in_result():
+    with patch("ai_engine.services.product_analysis_service.mistral_client") as mock_mistral:
+        mock_mistral.chat_completion_json.return_value = _raw_ai_result()
+        result = analyze_product_text("Some clean product description", language="en")
+
+    assert result["language"] == "en"
+
+
+def test_unsupported_language_falls_back_to_french():
+    with patch("ai_engine.services.product_analysis_service.mistral_client") as mock_mistral:
+        mock_mistral.chat_completion_json.return_value = _raw_ai_result()
+        result = analyze_product_text("Some clean product description", language="de")
+
+    assert result["language"] == "fr"
+
+
+def test_local_trap_warning_is_localized_in_english():
+    """Le warning ajouté par le filet de sécurité local (pas par l'IA) doit être en anglais
+    quand language="en" — sinon mélange de langues même si l'IA répond correctement en anglais."""
+    with patch("ai_engine.services.product_analysis_service.mistral_client") as mock_mistral:
+        mock_mistral.chat_completion_json.return_value = _raw_ai_result()
+        result = analyze_product_text("Protective case only, phone not included", language="en")
+
+    trap_warnings = [w for w in result["warnings"] if "case only" in w]
+    assert trap_warnings, "expected a trap-keyword warning to be present"
+    assert "Risky keyword detected" in trap_warnings[0]
+    assert "Mot-clé à risque" not in trap_warnings[0]
+
+
+def test_fallback_result_is_localized_in_english():
+    with patch("ai_engine.services.product_analysis_service.mistral_client") as mock_mistral:
+        mock_mistral.chat_completion_json.side_effect = MistralAPIError("boom")
+        result = analyze_product_text("Some product text", language="en")
+
+    assert "temporarily unavailable" in result["warnings"][0]
+    assert "momentanément indisponible" not in result["warnings"][0]
+
+
+def test_import_decision_is_set_on_final_result():
+    with patch("ai_engine.services.product_analysis_service.mistral_client") as mock_mistral:
+        mock_mistral.chat_completion_json.return_value = _raw_ai_result(
+            commercial_potential_rating=5
+        )
+        result = analyze_product_text("Clean product with no risky keywords")
+
+    assert result["import_decision"] in ("import", "study", "avoid")

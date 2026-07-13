@@ -260,7 +260,7 @@ def test_analyze_multi_capture_mistral_failure_uses_local_fallback(mocked_pipeli
 
     result = analyze_multi_capture(captures, category_hints=None)
 
-    # Le filet de sécurité local (FALLBACK_RESULT) prend le relais, sans planter.
+    # Le filet de sécurité local (_fallback_result()) prend le relais, sans planter.
     assert result["recommendation"] == "CAUTION"
     assert result["confidence_level"] == "insufficient"
     assert result["captures"][0]["category"] == "main_page"

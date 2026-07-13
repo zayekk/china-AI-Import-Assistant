@@ -38,18 +38,46 @@ class AnalyzeImageRequest(BaseModel):
 
 
 class CommercialEstimate(BaseModel):
-    """Estimation commerciale (coût/revente/marge), générée par l'IA en texte libre
-    (devises/unités trop variables pour du numérique strict) ou marquée impossible
-    si le texte source ne contient aucune donnée de prix exploitable."""
+    """
+    Analyse financière (coût d'achat/transport/douane -> coût rendu -> revente -> bénéfice/marge),
+    ou marquée impossible si le texte source ne contient aucune donnée de prix exploitable.
+
+    L'IA ne fournit que les 4 montants "input" (purchase_price_eur, estimated_transport_eur,
+    estimated_customs_eur, suggested_resale_price_eur) : tous les montants dérivés
+    (landed_cost_eur, estimated_profit_eur, margin_percentage, estimated_profit_fcfa,
+    commercial_potential) sont calculés STRICTEMENT côté serveur (voir
+    ai_engine/services/product_analysis_service.py::_normalize_commercial_estimate) pour
+    garantir une arithmétique cohérente, jamais sujette aux approximations de calcul de l'IA.
+    """
 
     possible: bool = False
     reason_if_not_possible: str | None = None
-    estimated_purchase_cost: str | None = None
-    suggested_resale_price: str | None = None
-    estimated_gross_margin: str | None = None
-    # Calculé STRICTEMENT côté serveur à partir de "profit_score" (jamais par l'IA), afin que
-    # cette valeur soit toujours cohérente avec "margin_potential" du résumé rapide.
+
+    # --- Fournis par l'IA (estimations, jamais des faits confirmés) ---
+    purchase_price_eur: float | None = None
+    estimated_transport_eur: float | None = None
+    estimated_customs_eur: float | None = None
+    suggested_resale_price_eur: float | None = None
+
+    # --- Calculés côté serveur ---
+    landed_cost_eur: float | None = None
+    estimated_profit_eur: float | None = None
+    margin_percentage: float | None = None
+    # Conversion au taux FIXE réel EUR/XOF (settings.IMPORT_EUR_XOF_RATE), pas une estimation.
+    estimated_profit_fcfa: int | None = None
+    # Calculé à partir de margin_percentage si disponible, sinon de profit_score (repli) —
+    # toujours cohérent avec "margin_potential" du résumé rapide (même valeur).
     commercial_potential: Literal["low", "medium", "high"] | None = None
+
+
+class MarketComparison(BaseModel):
+    """Comparaison d'un composant technique détecté (GPU, CPU, RAM, SSD...) à des références
+    connues du marché actuel (ex: component="GPU", detected_value="HD 7670",
+    comparison="≈ GTX 750 Ti, très inférieur à une RTX 3060 actuelle")."""
+
+    component: str
+    detected_value: str
+    comparison: str
 
 
 class AIAnalysisResult(BaseModel):
@@ -95,6 +123,29 @@ class AIAnalysisResult(BaseModel):
     supplier_reliability: Literal["yes", "medium", "no"] = "medium"
     margin_potential: Literal["low", "medium", "high"] = "medium"
 
+    # --- v1.1 : langue, potentiel commercial, décision import, comparaisons marché, demande ---
+    # Langue effectivement utilisée pour générer ce rapport (transmise par le frontend via
+    # l'en-tête X-Language, jamais choisie par l'IA) — voir ai_engine/prompts/product_prompts.py.
+    language: Literal["fr", "en"] = "fr"
+
+    commercial_potential_rating: int = Field(default=3, ge=1, le=5)
+    commercial_potential_explanation: str = ""
+
+    # import_decision est TOUJOURS calculé côté serveur (jamais par l'IA), à partir de
+    # decision_badge/margin_potential/commercial_potential_rating/critical_alerts déjà produits —
+    # aucun appel IA supplémentaire. Voir _import_decision() dans product_analysis_service.py.
+    import_decision: Literal["import", "study", "avoid"] = "study"
+    import_decision_explanation: str = ""
+
+    market_comparisons: list[MarketComparison] = Field(default_factory=list)
+
+    demand_level: Literal["very_high", "high", "medium", "low", "very_low"] = "medium"
+    demand_explanation: str = ""
+
+    # Résumé de lecture ultra-rapide (<10s), généré par l'IA à partir des champs ci-dessus,
+    # sans information nouvelle (voir règle prompt correspondante).
+    quick_report: list[str] = Field(default_factory=list)
+
 
 class AnalysisOut(BaseModel):
     id: uuid.UUID
@@ -126,6 +177,16 @@ class AnalysisOut(BaseModel):
     risk_level: str | None = None
     supplier_reliability: str | None = None
     margin_potential: str | None = None
+
+    language: str | None = None
+    commercial_potential_rating: int | None = None
+    commercial_potential_explanation: str | None = None
+    import_decision: str | None = None
+    import_decision_explanation: str | None = None
+    market_comparisons: list[dict] | None = None
+    demand_level: str | None = None
+    demand_explanation: str | None = None
+    quick_report: list[str] | None = None
 
     model_config = {"from_attributes": True}
 

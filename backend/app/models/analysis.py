@@ -76,6 +76,19 @@ class Analysis(Base):
     supplier_reliability = Column(String(10), nullable=True)
     margin_potential = Column(String(10), nullable=True)
 
+    # v1.1 : langue de génération du rapport, potentiel commercial (étoiles), décision
+    # d'import dédiée, comparaisons marché, demande — voir schémas AIAnalysisResult /
+    # MarketComparison et ai_engine/services/product_analysis_service.py.
+    language = Column(String(2), nullable=True)
+    commercial_potential_rating = Column(Integer, nullable=True)
+    commercial_potential_explanation = Column(Text, nullable=True)
+    import_decision = Column(String(10), nullable=True)
+    import_decision_explanation = Column(Text, nullable=True)
+    market_comparisons = Column(JSON, nullable=True)      # liste de dicts MarketComparison
+    demand_level = Column(String(12), nullable=True)
+    demand_explanation = Column(Text, nullable=True)
+    quick_report = Column(JSON, nullable=True)            # liste de strings
+
     raw_ai_response = Column(JSON, nullable=True)  # réponse brute pour debug / audit
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())

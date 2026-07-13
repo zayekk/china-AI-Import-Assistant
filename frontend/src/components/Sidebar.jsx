@@ -1,7 +1,8 @@
-import React from "react";
+import React, { useState } from "react";
 import { NavLink } from "react-router-dom";
-import { Home, Search, Package, Settings, ShoppingBag, Calculator, ListChecks } from "lucide-react";
+import { Home, Search, Package, Settings, ShoppingBag, Calculator, ListChecks, Languages } from "lucide-react";
 import clsx from "clsx";
+import { SUPPORTED_LANGUAGES, getLanguage, setLanguage } from "../utils/language";
 
 const navItems = [
   { to: "/", label: "Accueil", icon: Home, end: true },
@@ -13,6 +14,13 @@ const navItems = [
 ];
 
 export default function Sidebar() {
+  const [language, setLanguageState] = useState(getLanguage());
+
+  const handleLanguageChange = (code) => {
+    setLanguage(code);
+    setLanguageState(code);
+  };
+
   return (
     <aside className="w-64 shrink-0 bg-white border-r border-gray-200 h-screen sticky top-0 flex flex-col">
       <div className="px-6 py-5 border-b border-gray-200">
@@ -44,7 +52,30 @@ export default function Sidebar() {
         ))}
       </nav>
 
-      <div className="px-3 py-4 border-t border-gray-200">
+      <div className="px-3 py-4 border-t border-gray-200 space-y-3">
+        <div className="px-3">
+          <p className="flex items-center gap-1.5 text-xs font-medium text-gray-400 mb-1.5">
+            <Languages size={13} /> Langue du rapport IA
+          </p>
+          <div className="inline-flex rounded-lg border border-gray-200 overflow-hidden">
+            {SUPPORTED_LANGUAGES.map(({ code, label }) => (
+              <button
+                key={code}
+                type="button"
+                onClick={() => handleLanguageChange(code)}
+                className={clsx(
+                  "px-3 py-1 text-xs font-semibold transition-colors",
+                  language === code
+                    ? "bg-brand-600 text-white"
+                    : "bg-white text-gray-500 hover:bg-gray-100"
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
         <NavLink
           to="/settings"
           className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100"

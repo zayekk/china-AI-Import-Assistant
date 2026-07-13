@@ -8,7 +8,7 @@ POST /analyze-url     -> scrape un lien produit puis l'analyse
 """
 import logging
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
 from ai_engine.services.multi_capture_service import analyze_multi_capture
@@ -39,6 +39,19 @@ from scraper.spiders.base_spider import SpiderError
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Analyse Produit"])
+
+_SUPPORTED_LANGUAGES = ("fr", "en")
+
+
+def _resolve_language(x_language: str | None) -> str:
+    """
+    Normalise l'en-tête X-Language (injecté par frontend/src/services/apiClient.js à partir
+    du sélecteur FR/EN, voir frontend/src/utils/language.js) : retombe sur "fr" si absent ou
+    non supporté, plutôt que de laisser passer une valeur arbitraire jusqu'au prompt IA.
+    """
+    if x_language and x_language.lower() in _SUPPORTED_LANGUAGES:
+        return x_language.lower()
+    return "fr"
 
 
 def _persist_analysis(
@@ -81,6 +94,15 @@ def _persist_analysis(
         risk_level=result.get("risk_level"),
         supplier_reliability=result.get("supplier_reliability"),
         margin_potential=result.get("margin_potential"),
+        language=result.get("language"),
+        commercial_potential_rating=result.get("commercial_potential_rating"),
+        commercial_potential_explanation=result.get("commercial_potential_explanation"),
+        import_decision=result.get("import_decision"),
+        import_decision_explanation=result.get("import_decision_explanation"),
+        market_comparisons=result.get("market_comparisons"),
+        demand_level=result.get("demand_level"),
+        demand_explanation=result.get("demand_explanation"),
+        quick_report=result.get("quick_report"),
         raw_ai_response=result,
     )
     db.add(analysis)
@@ -117,13 +139,15 @@ def analyze_text(
     payload: AnalyzeTextRequest,
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_optional_user),
+    x_language: str | None = Header(default=None, alias="X-Language"),
 ):
     """
-    Analyse un texte produit brut (titre/description), dans n'importe quelle langue.
+    Analyse un texte produit brut (titre/description), dans n'importe quelle langue source.
     Détecte les pièges classiques ("case only", "no battery included", etc.)
-    et retourne un résultat structuré avec recommandation BUY/AVOID/CAUTION.
+    et retourne un résultat structuré avec recommandation BUY/AVOID/CAUTION, rédigé dans la
+    langue choisie par l'utilisateur (en-tête X-Language, "fr" par défaut).
     """
-    result = analyze_product_text(payload.text)
+    result = analyze_product_text(payload.text, language=_resolve_language(x_language))
     _persist_analysis(
         db,
         source_type=AnalysisSourceType.TEXT,
@@ -140,6 +164,7 @@ async def analyze_image(
     file: UploadFile = File(..., description="Capture d'écran de la fiche produit"),
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_optional_user),
+    x_language: str | None = Header(default=None, alias="X-Language"),
 ):
     """
     Analyse une capture d'écran de fiche produit :
@@ -165,7 +190,7 @@ async def analyze_image(
     except OCRError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
 
-    result = analyze_product_text(extracted_text)
+    result = analyze_product_text(extracted_text, language=_resolve_language(x_language))
     _persist_analysis(
         db,
         source_type=AnalysisSourceType.IMAGE,
@@ -187,6 +212,7 @@ async def analyze_images(
     ),
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_optional_user),
+    x_language: str | None = Header(default=None, alias="X-Language"),
 ):
     """
     Analyse multi-captures intelligente (5 à 12 images, 8 recommandé) :
@@ -221,7 +247,9 @@ async def analyze_images(
             )
         captures.append((f.filename or "capture", contents))
 
-    result = analyze_multi_capture(captures, category_hints=categories)
+    result = analyze_multi_capture(
+        captures, category_hints=categories, language=_resolve_language(x_language)
+    )
 
     combined_excerpt = " | ".join(c.get("ocr_excerpt", "") for c in result.get("captures", []))
     _persist_analysis(
@@ -240,6 +268,7 @@ def analyze_url(
     payload: AnalyzeUrlRequest,
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_optional_user),
+    x_language: str | None = Header(default=None, alias="X-Language"),
 ):
     """
     Analyse un lien produit (Taobao / Pinduoduo / Alibaba / 1688) :
@@ -267,7 +296,7 @@ def analyze_url(
         )
         combined_text += f"\n\nVariantes: {variant_lines}"
 
-    result = analyze_product_text(combined_text)
+    result = analyze_product_text(combined_text, language=_resolve_language(x_language))
 
     # Sauvegarde du produit scrapé
     product = Product(

@@ -10,12 +10,18 @@ import {
   Smartphone,
   Bot,
   TrendingUp,
+  Award,
+  Activity,
+  Cpu,
 } from "lucide-react";
 import clsx from "clsx";
 import RecommendationBanner from "./RecommendationBanner";
 import ScoreBadge from "./ScoreBadge";
 import QuickSummaryBar from "./QuickSummaryBar";
 import CriticalAlertsBanner from "./CriticalAlertsBanner";
+import QuickReportBanner from "./QuickReportBanner";
+import ImportDecisionCard from "./ImportDecisionCard";
+import StarRating from "./StarRating";
 
 // Bandes de confiance : bornes STRICTEMENT alignées sur `_confidence_level()` côté serveur
 // (backend/ai_engine/services/product_analysis_service.py) : 0-30 / 31-60 / 61-80 / 81-100.
@@ -26,12 +32,30 @@ const CONFIDENCE_BANDS = [
   { max: 100, label: "Forte confiance", classes: "bg-green-50 text-green-800 border-green-300" },
 ];
 
+// Niveaux de demande marché : clés STRICTEMENT alignées sur _normalize_demand_level()
+// côté serveur (ai_engine/services/product_analysis_service.py).
+const DEMAND_META = {
+  very_high: { label: "Très forte", classes: "bg-green-50 text-green-700 border-green-200" },
+  high: { label: "Forte", classes: "bg-lime-50 text-lime-700 border-lime-200" },
+  medium: { label: "Moyenne", classes: "bg-yellow-50 text-yellow-700 border-yellow-200" },
+  low: { label: "Faible", classes: "bg-orange-50 text-orange-700 border-orange-200" },
+  very_low: { label: "Très faible", classes: "bg-red-50 text-red-700 border-red-200" },
+};
+
 function getConfidenceBand(score) {
   const numericScore = Number(score) || 0;
   return (
     CONFIDENCE_BANDS.find((band) => numericScore <= band.max) ||
     CONFIDENCE_BANDS[CONFIDENCE_BANDS.length - 1]
   );
+}
+
+function formatEur(value) {
+  return value === null || value === undefined ? "—" : `${Number(value).toFixed(2)} €`;
+}
+
+function formatFcfa(value) {
+  return value === null || value === undefined ? "—" : `${Number(value).toLocaleString("fr-FR")} FCFA`;
 }
 
 /**
@@ -71,11 +95,20 @@ export default function AnalysisResultCard({ result }) {
     risk_level,
     supplier_reliability,
     margin_potential,
+    commercial_potential_rating,
+    commercial_potential_explanation,
+    import_decision,
+    import_decision_explanation,
+    market_comparisons = [],
+    demand_level,
+    demand_explanation,
+    quick_report = [],
   } = result;
 
   const confidenceBand = getConfidenceBand(confidence_score);
   const detectedEntries = Object.entries(detected_data || {});
   const estimationEntries = Object.entries(ai_estimations || {});
+  const demandMeta = DEMAND_META[demand_level] || DEMAND_META.medium;
 
   return (
     <div className="space-y-6">
@@ -87,7 +120,13 @@ export default function AnalysisResultCard({ result }) {
         marginPotential={margin_potential}
       />
 
+      <QuickReportBanner items={quick_report} />
+
       <CriticalAlertsBanner alerts={critical_alerts} />
+
+      {import_decision && (
+        <ImportDecisionCard decision={import_decision} explanation={import_decision_explanation} />
+      )}
 
       <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 space-y-6">
       {mobile_summary && (
@@ -127,25 +166,79 @@ export default function AnalysisResultCard({ result }) {
         <ScoreBadge label="Score final" score={final_score} />
       </div>
 
+      {(commercial_potential_rating || demand_level) && (
+        <div className="grid sm:grid-cols-2 gap-4">
+          {commercial_potential_rating != null && (
+            <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-2">
+              <h3 className="flex items-center gap-2 text-sm font-semibold text-gray-800">
+                <Award size={16} /> Potentiel commercial
+              </h3>
+              <StarRating rating={commercial_potential_rating} />
+              {commercial_potential_explanation && (
+                <p className="text-sm text-gray-600">{commercial_potential_explanation}</p>
+              )}
+            </div>
+          )}
+
+          {demand_level && (
+            <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-2">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <h3 className="flex items-center gap-2 text-sm font-semibold text-gray-800">
+                  <Activity size={16} /> Demande du marché
+                </h3>
+                <span className={clsx("rounded-full border px-3 py-1 text-xs font-semibold", demandMeta.classes)}>
+                  {demandMeta.label}
+                </span>
+              </div>
+              {demand_explanation && <p className="text-sm text-gray-600">{demand_explanation}</p>}
+            </div>
+          )}
+        </div>
+      )}
+
       {commercial_estimate && (
         <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 space-y-2">
           <h3 className="flex items-center gap-2 text-sm font-semibold text-emerald-800">
-            <TrendingUp size={16} /> Estimation commerciale
+            <TrendingUp size={16} /> Analyse financière
           </h3>
           <p className="text-xs text-emerald-600 italic">Estimation générée par IA, pas une donnée confirmée</p>
           {commercial_estimate.possible ? (
-            <dl className="grid sm:grid-cols-3 gap-3 mt-1">
+            <dl className="grid sm:grid-cols-2 md:grid-cols-4 gap-3 mt-1">
               <div className="text-sm text-emerald-900">
-                <dt className="text-xs font-medium text-emerald-600">Coût d'achat estimé</dt>
-                <dd>{commercial_estimate.estimated_purchase_cost || "—"}</dd>
+                <dt className="text-xs font-medium text-emerald-600">Prix d'achat</dt>
+                <dd>{formatEur(commercial_estimate.purchase_price_eur)}</dd>
+              </div>
+              <div className="text-sm text-emerald-900">
+                <dt className="text-xs font-medium text-emerald-600">Transport estimé</dt>
+                <dd>{formatEur(commercial_estimate.estimated_transport_eur)}</dd>
+              </div>
+              <div className="text-sm text-emerald-900">
+                <dt className="text-xs font-medium text-emerald-600">Douane estimée</dt>
+                <dd>{formatEur(commercial_estimate.estimated_customs_eur)}</dd>
+              </div>
+              <div className="text-sm text-emerald-900">
+                <dt className="text-xs font-medium text-emerald-600">Coût rendu</dt>
+                <dd className="font-semibold">{formatEur(commercial_estimate.landed_cost_eur)}</dd>
               </div>
               <div className="text-sm text-emerald-900">
                 <dt className="text-xs font-medium text-emerald-600">Prix de revente conseillé</dt>
-                <dd>{commercial_estimate.suggested_resale_price || "—"}</dd>
+                <dd>{formatEur(commercial_estimate.suggested_resale_price_eur)}</dd>
               </div>
               <div className="text-sm text-emerald-900">
-                <dt className="text-xs font-medium text-emerald-600">Marge brute estimée</dt>
-                <dd>{commercial_estimate.estimated_gross_margin || "—"}</dd>
+                <dt className="text-xs font-medium text-emerald-600">Bénéfice estimé</dt>
+                <dd className="font-semibold">{formatEur(commercial_estimate.estimated_profit_eur)}</dd>
+              </div>
+              <div className="text-sm text-emerald-900">
+                <dt className="text-xs font-medium text-emerald-600">Marge</dt>
+                <dd className="font-semibold">
+                  {commercial_estimate.margin_percentage != null
+                    ? `${commercial_estimate.margin_percentage}%`
+                    : "—"}
+                </dd>
+              </div>
+              <div className="text-sm text-emerald-900">
+                <dt className="text-xs font-medium text-emerald-600">Bénéfice en FCFA</dt>
+                <dd className="font-semibold">{formatFcfa(commercial_estimate.estimated_profit_fcfa)}</dd>
               </div>
             </dl>
           ) : (
@@ -153,6 +246,26 @@ export default function AnalysisResultCard({ result }) {
               Estimation non disponible : {commercial_estimate.reason_if_not_possible || "données insuffisantes."}
             </p>
           )}
+        </div>
+      )}
+
+      {market_comparisons.length > 0 && (
+        <div>
+          <h3 className="flex items-center gap-2 text-sm font-semibold text-gray-800 mb-2">
+            <Cpu size={16} /> Comparaison avec le marché
+          </h3>
+          <ul className="space-y-2">
+            {market_comparisons.map((item, idx) => (
+              <li key={idx} className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+                <p className="text-sm">
+                  <span className="font-semibold text-gray-800">{item.component}</span>
+                  <span className="text-gray-400"> · </span>
+                  <span className="text-gray-600">{item.detected_value}</span>
+                </p>
+                <p className="text-sm text-gray-700 mt-0.5">{item.comparison}</p>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 

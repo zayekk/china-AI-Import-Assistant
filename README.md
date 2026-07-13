@@ -176,22 +176,49 @@ requises et alternative pour garder le scraping : voir
   "commercial_estimate": {
     "possible": true,
     "reason_if_not_possible": null,
-    "estimated_purchase_cost": "≈ 3-5 ¥",
-    "suggested_resale_price": "≈ 9-12 €",
-    "estimated_gross_margin": "≈ 5-8 €",
+    "purchase_price_eur": 2.0,
+    "estimated_transport_eur": 1.0,
+    "estimated_customs_eur": 0.5,
+    "landed_cost_eur": 3.5,
+    "suggested_resale_price_eur": 9.0,
+    "estimated_profit_eur": 5.5,
+    "margin_percentage": 61.1,
+    "estimated_profit_fcfa": 3608,
     "commercial_potential": "medium"
   },
   "decision_badge": "caution",
   "risk_level": "medium",
   "supplier_reliability": "medium",
-  "margin_potential": "medium"
+  "margin_potential": "medium",
+  "language": "fr",
+  "commercial_potential_rating": 3,
+  "commercial_potential_explanation": "Potentiel moyen : accessoire simple, marge correcte mais concurrence forte sur ce type de produit.",
+  "import_decision": "study",
+  "import_decision_explanation": "À étudier : la marge est correcte mais le manque d'informations sur le fournisseur incite à la prudence.",
+  "market_comparisons": [],
+  "demand_level": "medium",
+  "demand_explanation": "Demande stable pour les accessoires de protection, sans pic saisonnier particulier.",
+  "quick_report": [
+    "✅ Coque de protection correctement identifiée.",
+    "❌ Batterie et chargeur non inclus malgré le titre.",
+    "💰 Marge correcte."
+  ]
 }
 ```
 
-`critical_alerts`, `commercial_estimate` et `ai_recommendation_summary` sont générés par l'IA
-(dans le même appel Mistral, aucune requête supplémentaire). `decision_badge`, `risk_level`,
-`supplier_reliability` et `margin_potential` sont toujours calculés côté serveur à partir des
-scores ci-dessus (jamais par l'IA), pour garantir un affichage déterministe et cohérent — voir
+`critical_alerts`, `ai_recommendation_summary`, les 4 montants d'entrée de `commercial_estimate`
+(`purchase_price_eur`/`estimated_transport_eur`/`estimated_customs_eur`/
+`suggested_resale_price_eur`), `commercial_potential_rating`/`commercial_potential_explanation`,
+`import_decision_explanation`, `market_comparisons`, `demand_level`/`demand_explanation` et
+`quick_report` sont générés par l'IA (dans le même appel Mistral, aucune requête
+supplémentaire), **dans la langue choisie par l'utilisateur** (`language`, transmise via
+l'en-tête HTTP `X-Language` — sélecteur FR/EN dans la barre latérale du frontend).
+
+`decision_badge`, `risk_level`, `supplier_reliability`, `margin_potential`, `import_decision`
+et le reste de `commercial_estimate` (`landed_cost_eur`, `estimated_profit_eur`,
+`margin_percentage`, `estimated_profit_fcfa` — conversion au taux fixe réel EUR/FCFA, pas une
+estimation) sont toujours calculés côté serveur à partir des champs ci-dessus (jamais par
+l'IA), pour garantir un affichage déterministe et cohérent — voir
 `ai_engine/services/product_analysis_service.py`.
 
 ## Ajouter une nouvelle plateforme au scraper

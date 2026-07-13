@@ -3,6 +3,7 @@
  * injecte automatiquement le token JWT s'il est présent.
  */
 import axios from "axios";
+import { getLanguage } from "../utils/language";
 
 // En déploiement "tout-en-un" (frontend + API sur le même domaine Vercel), l'URL
 // relative /api/v1 suffit. Si le backend est hébergé séparément (ex: Docker sur
@@ -20,6 +21,10 @@ apiClient.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+  // Langue du rapport d'analyse IA (sélecteur FR/EN, voir utils/language.js) : injectée
+  // ici une seule fois pour que TOUS les appels d'analyse (texte/image/multi/scan guidé/url)
+  // en bénéficient automatiquement, sans dupliquer cette logique dans chaque service.
+  config.headers["X-Language"] = getLanguage();
   return config;
 });
 

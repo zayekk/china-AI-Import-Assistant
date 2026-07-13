@@ -19,14 +19,15 @@ import imagehash
 from PIL import Image
 
 from ai_engine.prompts.product_prompts import (
-    SYSTEM_PROMPT_PRODUCT_ANALYSIS,
+    DEFAULT_LANGUAGE,
+    build_system_prompt,
     build_user_prompt_for_multi_capture_analysis,
 )
 from ai_engine.services.mistral_client import MistralAPIError, mistral_client
 from ai_engine.services.ocr_service import OCRError, extract_text_from_image_bytes
 from ai_engine.services.product_analysis_service import (
-    FALLBACK_RESULT,
     _apply_local_safety_net,
+    _fallback_result,
     _normalize_ai_result,
 )
 
@@ -131,6 +132,7 @@ def detect_duplicates(hashes: list[str]) -> dict[int, int]:
 def analyze_multi_capture(
     captures: list[tuple[str, bytes]],
     category_hints: list[str] | None = None,
+    language: str = DEFAULT_LANGUAGE,
 ) -> dict:
     """
     Pipeline complet d'analyse multi-captures.
@@ -145,6 +147,9 @@ def analyze_multi_capture(
     est utilisée pour toutes les captures (comportement inchangé). Si un hint individuel
     n'est pas une catégorie canonique valide, on retombe sur la classification automatique
     pour CETTE capture uniquement.
+
+    `language` : langue cible du rapport ("fr"/"en", choisie par l'utilisateur) — voir
+    `analyze_product_text()` dans product_analysis_service.py pour le détail du mécanisme.
 
     Retourne un dict respectant le contrat `AIAnalysisResult` complet, plus les clés
     "captures", "categories_covered" et "categories_missing".
@@ -196,20 +201,21 @@ def analyze_multi_capture(
     )
 
     # f. Appel IA consolidé (même contrat que analyze_product_text), avec fallback gracieux.
+    language = language if language in ("fr", "en") else DEFAULT_LANGUAGE
     try:
         user_prompt = build_user_prompt_for_multi_capture_analysis(categorized_sections)
         raw_result = mistral_client.chat_completion_json(
-            system_prompt=SYSTEM_PROMPT_PRODUCT_ANALYSIS,
+            system_prompt=build_system_prompt(language),
             user_prompt=user_prompt,
         )
-        result = _normalize_ai_result(raw_result)
+        result = _normalize_ai_result(raw_result, language)
     except MistralAPIError as exc:
         logger.error("Échec analyse IA multi-captures, fallback local activé: %s", exc)
         # deepcopy : voir la note équivalente dans product_analysis_service.py.
-        result = copy.deepcopy(FALLBACK_RESULT)
+        result = copy.deepcopy(_fallback_result(language))
         result["product_name"] = aggregated_text[:120]
 
-    result = _apply_local_safety_net(result, aggregated_text)
+    result = _apply_local_safety_net(result, aggregated_text, language)
 
     # g. Détail de classification par capture + couverture des catégories.
     captures_detail = []

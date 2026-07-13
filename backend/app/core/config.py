@@ -76,6 +76,10 @@ class Settings(BaseSettings):
     IMPORT_AIR_RATE_CNY_PER_KG: float = 55.0
     IMPORT_SEA_RATE_CNY_PER_KG: float = 12.0
     IMPORT_EUR_CNY_RATE: float = 0.13
+    # Parité FCFA (XOF/XAF) : taux FIXE réel (accord de coopération monétaire, pas une
+    # estimation de marché) — 1 EUR = 655.957 FCFA. Configurable comme les autres taux
+    # ci-dessus, mais la valeur par défaut est la parité officielle, non un indicatif.
+    IMPORT_EUR_XOF_RATE: float = 655.957
 
     model_config = SettingsConfigDict(
         env_file=".env",
