@@ -176,50 +176,73 @@ requises et alternative pour garder le scraping : voir
   "commercial_estimate": {
     "possible": true,
     "reason_if_not_possible": null,
-    "purchase_price_eur": 2.0,
-    "estimated_transport_eur": 1.0,
-    "estimated_customs_eur": 0.5,
-    "landed_cost_eur": 3.5,
-    "suggested_resale_price_eur": 9.0,
-    "estimated_profit_eur": 5.5,
-    "margin_percentage": 61.1,
-    "estimated_profit_fcfa": 3608,
-    "commercial_potential": "medium"
+    "purchase_price_cny": 58.0,
+    "estimated_transport_cny": 12.0,
+    "estimated_customs_cny": 3.0,
+    "misc_fees_cny": 2.0,
+    "suggested_resale_price_fcfa": 12000.0,
+    "landed_cost_fcfa": 7500.0,
+    "estimated_profit_fcfa": 4500,
+    "margin_percentage": 37.5,
+    "roi_percentage": 60.0,
+    "commercial_potential": "high",
+    "purchase_price_eur": null,
+    "estimated_transport_eur": null,
+    "estimated_customs_eur": null,
+    "suggested_resale_price_eur": null,
+    "landed_cost_eur": null,
+    "estimated_profit_eur": null
   },
-  "decision_badge": "caution",
+  "decision_badge": "verify",
   "risk_level": "medium",
   "supplier_reliability": "medium",
-  "margin_potential": "medium",
+  "margin_potential": "high",
   "language": "fr",
-  "commercial_potential_rating": 3,
-  "commercial_potential_explanation": "Potentiel moyen : accessoire simple, marge correcte mais concurrence forte sur ce type de produit.",
-  "import_decision": "study",
-  "import_decision_explanation": "À étudier : la marge est correcte mais le manque d'informations sur le fournisseur incite à la prudence.",
+  "commercial_potential_rating": 4,
+  "commercial_potential_explanation": "Bon potentiel : produit standard, marge correcte, forte demande.",
+  "import_decision": "import",
+  "import_decision_explanation": "Import viable, marge suffisante malgré une concurrence moyenne.",
   "market_comparisons": [],
-  "demand_level": "medium",
-  "demand_explanation": "Demande stable pour les accessoires de protection, sans pic saisonnier particulier.",
+  "demand_level": "high",
+  "demand_explanation": "Accessoire très demandé, sans pic saisonnier particulier.",
   "quick_report": [
-    "✅ Coque de protection correctement identifiée.",
-    "❌ Batterie et chargeur non inclus malgré le titre.",
-    "💰 Marge correcte."
-  ]
+    "🟡 À étudier",
+    "💰 Marge correcte",
+    "⚠ Vérifier le contenu exact du pack"
+  ],
+  "decision_reasons": ["marge correcte", "demande forte", "contenu du pack à vérifier"],
+  "winning_product_score": 7,
+  "winning_product_explanation": "Bonne demande et marge correcte compensent une concurrence moyenne.",
+  "competition_level": "medium",
+  "competition_explanation": "Marché courant avec plusieurs vendeurs similaires.",
+  "data_confidence": {"price": 90, "specifications": 70, "photos": 40, "reviews": 20, "ocr": 95},
+  "average_market_price": "≈ 55-65 ¥",
+  "market_positioning": "mid_range",
+  "market_positioning_explanation": "Positionnement standard, ni premium ni entrée de gamme.",
+  "resale_ease_rating": 4,
+  "resale_ease_explanation": "Produit facile à revendre, forte rotation."
 }
 ```
 
-`critical_alerts`, `ai_recommendation_summary`, les 4 montants d'entrée de `commercial_estimate`
-(`purchase_price_eur`/`estimated_transport_eur`/`estimated_customs_eur`/
-`suggested_resale_price_eur`), `commercial_potential_rating`/`commercial_potential_explanation`,
-`import_decision_explanation`, `market_comparisons`, `demand_level`/`demand_explanation` et
-`quick_report` sont générés par l'IA (dans le même appel Mistral, aucune requête
-supplémentaire), **dans la langue choisie par l'utilisateur** (`language`, transmise via
-l'en-tête HTTP `X-Language` — sélecteur FR/EN dans la barre latérale du frontend).
+Tous les champs ci-dessus (hors ceux listés dans le paragraphe suivant) sont générés par l'IA
+dans le **même appel Mistral** (aucune requête supplémentaire), **dans la langue choisie par
+l'utilisateur** (`language`, transmise via l'en-tête HTTP `X-Language` — sélecteur FR/EN dans la
+barre latérale du frontend).
 
-`decision_badge`, `risk_level`, `supplier_reliability`, `margin_potential`, `import_decision`
-et le reste de `commercial_estimate` (`landed_cost_eur`, `estimated_profit_eur`,
-`margin_percentage`, `estimated_profit_fcfa` — conversion au taux fixe réel EUR/FCFA, pas une
-estimation) sont toujours calculés côté serveur à partir des champs ci-dessus (jamais par
-l'IA), pour garantir un affichage déterministe et cohérent — voir
-`ai_engine/services/product_analysis_service.py`.
+**Toujours calculés côté serveur**, jamais par l'IA, pour garantir cohérence et déterminisme —
+voir `ai_engine/services/product_analysis_service.py` : `decision_badge`, `risk_level`,
+`supplier_reliability`, `margin_potential`, `import_decision`, et dans `commercial_estimate` tout
+ce qui n'est pas un montant "input" — `landed_cost_fcfa`, `estimated_profit_fcfa`,
+`margin_percentage`, `roi_percentage`, `commercial_potential`, `landed_cost_eur`,
+`estimated_profit_eur`.
+
+**Pipeline financier (v1.2)** : l'IA fournit le prix fournisseur et les coûts annexes en **yuan**
+(devise réelle des plateformes chinoises) et le prix de revente conseillé directement en
+**FCFA** (revente locale en Afrique de l'Ouest/Centrale) ; le serveur calcule le coût rendu, le
+bénéfice, la marge % et le ROI via `settings.IMPORT_CNY_XOF_RATE` (1 ¥ = 100 FCFA par défaut —
+taux **volontairement heuristique**, pas le taux de change réel ; configurable, avec repli
+automatique sur le pipeline euro → FCFA au taux fixe réel EUR/XOF si l'IA n'a trouvé aucun prix
+en yuan).
 
 ## Ajouter une nouvelle plateforme au scraper
 

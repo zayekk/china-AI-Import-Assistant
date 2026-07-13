@@ -103,6 +103,17 @@ def _persist_analysis(
         demand_level=result.get("demand_level"),
         demand_explanation=result.get("demand_explanation"),
         quick_report=result.get("quick_report"),
+        decision_reasons=result.get("decision_reasons"),
+        winning_product_score=result.get("winning_product_score"),
+        winning_product_explanation=result.get("winning_product_explanation"),
+        competition_level=result.get("competition_level"),
+        competition_explanation=result.get("competition_explanation"),
+        data_confidence=result.get("data_confidence"),
+        average_market_price=result.get("average_market_price"),
+        market_positioning=result.get("market_positioning"),
+        market_positioning_explanation=result.get("market_positioning_explanation"),
+        resale_ease_rating=result.get("resale_ease_rating"),
+        resale_ease_explanation=result.get("resale_ease_explanation"),
         raw_ai_response=result,
     )
     db.add(analysis)

@@ -12,10 +12,15 @@ sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from ai_engine.services.mistral_client import MistralAPIError
 from ai_engine.services.product_analysis_service import (
+    _clamp_winning_score,
     _decision_badge,
     _import_decision,
     _margin_potential,
     _normalize_commercial_estimate,
+    _normalize_competition_level,
+    _normalize_data_confidence,
+    _normalize_decision_reasons,
+    _normalize_market_positioning,
     _risk_level,
     _supplier_reliability,
     analyze_product_text,
@@ -356,3 +361,125 @@ def test_import_decision_is_set_on_final_result():
         result = analyze_product_text("Clean product with no risky keywords")
 
     assert result["import_decision"] in ("import", "study", "avoid")
+
+
+# ---------------------------------------------------------------------------
+# v1.2 : pipeline financier primaire yuan -> FCFA (taux heuristique 1¥=100 FCFA), avec
+# repli sur le pipeline euro -> FCFA (parité fixe réelle) quand aucun prix en yuan n'est fourni.
+# ---------------------------------------------------------------------------
+
+
+def test_commercial_estimate_cny_pipeline_computes_fcfa_breakdown_and_roi():
+    raw = {
+        "commercial_estimate": {
+            "possible": True,
+            "purchase_price_cny": 50.0,
+            "estimated_transport_cny": 10.0,
+            "estimated_customs_cny": 5.0,
+            "misc_fees_cny": 2.0,
+            "suggested_resale_price_fcfa": 10000.0,
+        }
+    }
+    result, margin_potential = _normalize_commercial_estimate(raw, profit_score=50, language="fr")
+    # (50+10+5+2) * 100 (taux heuristique) = 6700
+    assert result["landed_cost_fcfa"] == 6700.0
+    assert result["estimated_profit_fcfa"] == 3300
+    assert result["margin_percentage"] == 33.0
+    assert round(result["roi_percentage"], 2) == round(3300 / 6700 * 100, 2)
+    assert margin_potential == "high"
+    # Le pipeline euro n'a reçu aucune donnée : reste vide, sans planter.
+    assert result["landed_cost_eur"] is None
+
+
+def test_commercial_estimate_falls_back_to_eur_when_no_cny_price():
+    """Sans prix en yuan mais avec un prix en euros, le calculateur FCFA reste renseigné via
+    la parité fixe réelle EUR/XOF (comportement v1.1 conservé en repli)."""
+    raw = {
+        "commercial_estimate": {
+            "possible": True,
+            "purchase_price_eur": 10.0,
+            "suggested_resale_price_eur": 20.0,
+        }
+    }
+    result, _ = _normalize_commercial_estimate(raw, profit_score=50, language="fr")
+    assert result["landed_cost_fcfa"] is not None
+    assert result["estimated_profit_fcfa"] is not None
+    assert result["purchase_price_cny"] is None
+
+
+def test_commercial_estimate_both_currencies_computed_independently():
+    """Quand l'IA fournit à la fois yuan et euro, les deux pipelines restent disponibles
+    (pas d'écrasement) et le calcul FCFA privilégie le pipeline yuan, plus réaliste."""
+    raw = {
+        "commercial_estimate": {
+            "possible": True,
+            "purchase_price_cny": 50.0,
+            "suggested_resale_price_fcfa": 10000.0,
+            "purchase_price_eur": 8.0,
+            "suggested_resale_price_eur": 15.0,
+        }
+    }
+    result, _ = _normalize_commercial_estimate(raw, profit_score=50, language="fr")
+    assert result["landed_cost_eur"] == 8.0
+    assert result["estimated_profit_eur"] == 7.0
+    # Le calcul FCFA vient bien du pipeline yuan (50*100=5000), pas du pipeline euro.
+    assert result["landed_cost_fcfa"] == 5000.0
+
+
+# ---------------------------------------------------------------------------
+# v1.2 : winning_product_score, decision_reasons, competition_level, market_positioning,
+# data_confidence — normalisation et garde-fous serveur.
+# ---------------------------------------------------------------------------
+
+
+def test_clamp_winning_score_bounds():
+    assert _clamp_winning_score(15) == 10
+    assert _clamp_winning_score(-3) == 0
+    assert _clamp_winning_score("7") == 7
+    assert _clamp_winning_score(None) == 5
+
+
+def test_decision_reasons_truncated_to_five():
+    raw = {"decision_reasons": ["a", "b", "c", "d", "e", "f", "g"]}
+    assert _normalize_decision_reasons(raw) == ["a", "b", "c", "d", "e"]
+
+
+def test_decision_reasons_missing_key_is_empty_list():
+    assert _normalize_decision_reasons({}) == []
+
+
+def test_normalize_competition_level_invalid_falls_back_to_medium():
+    assert _normalize_competition_level("astronomical") == "medium"
+    assert _normalize_competition_level("very_high") == "very_high"
+
+
+def test_normalize_market_positioning_invalid_falls_back_to_unknown():
+    assert _normalize_market_positioning("bargain") == "unknown"
+    assert _normalize_market_positioning("premium") == "premium"
+
+
+def test_normalize_data_confidence_clamps_each_category():
+    raw = {"data_confidence": {"price": 150, "specifications": -10, "photos": 60, "ocr": "97"}}
+    result = _normalize_data_confidence(raw)
+    assert result == {"price": 100, "specifications": 0, "photos": 60, "reviews": 0, "ocr": 97}
+
+
+def test_winning_product_score_capped_when_critical_alert_present():
+    """Garde-fou serveur : une contradiction factuelle avérée plafonne le score produit
+    gagnant à 3/10, même si l'IA renvoie un score plus élevé (RÈGLE ABSOLUE non fiable seule)."""
+    with patch("ai_engine.services.product_analysis_service.mistral_client") as mock_mistral:
+        mock_mistral.chat_completion_json.return_value = _raw_ai_result(
+            critical_alerts=["RTX 5060 annoncé mais HD 7670 détecté"],
+            winning_product_score=9,
+        )
+        result = analyze_product_text("Some product text")
+
+    assert result["winning_product_score"] <= 3
+
+
+def test_winning_product_score_not_capped_without_critical_alerts():
+    with patch("ai_engine.services.product_analysis_service.mistral_client") as mock_mistral:
+        mock_mistral.chat_completion_json.return_value = _raw_ai_result(winning_product_score=9)
+        result = analyze_product_text("Clean product with no risky keywords")
+
+    assert result["winning_product_score"] == 9

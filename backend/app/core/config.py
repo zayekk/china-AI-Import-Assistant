@@ -80,6 +80,12 @@ class Settings(BaseSettings):
     # estimation de marché) — 1 EUR = 655.957 FCFA. Configurable comme les autres taux
     # ci-dessus, mais la valeur par défaut est la parité officielle, non un indicatif.
     IMPORT_EUR_XOF_RATE: float = 655.957
+    # Taux CNY -> FCFA (XOF/XAF) : volontairement HEURISTIQUE (1 Yuan = 100 FCFA), méthode de
+    # calcul mentale répandue chez les importateurs débutants — PAS le taux de change réel
+    # (~90-95 FCFA/¥). Valeur de config comme les taux ci-dessus : l'architecture permet de
+    # basculer sur un taux réel plus tard en changeant uniquement cette valeur (ou en la
+    # calculant depuis une API de change), sans autre modification de code.
+    IMPORT_CNY_XOF_RATE: float = 100.0
 
     model_config = SettingsConfigDict(
         env_file=".env",

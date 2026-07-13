@@ -23,7 +23,14 @@ from ai_engine.services.mistral_client import MistralAPIError, mistral_client
 logger = logging.getLogger(__name__)
 
 _VALID_DEMAND_LEVELS = ("very_high", "high", "medium", "low", "very_low")
+_VALID_COMPETITION_LEVELS = ("low", "medium", "high", "very_high")
+_VALID_MARKET_POSITIONING = ("premium", "mid_range", "entry_level", "saturated", "unknown")
 _VALID_LANGUAGES = ("fr", "en")
+_MAX_DECISION_REASONS = 5
+# Si une contradiction factuelle avérée existe, le potentiel "produit gagnant" ne peut pas être
+# élevé, quels que soient les autres facteurs (règle également imposée à l'IA dans le prompt,
+# mais jamais fait confiance à elle seule — voir RÈGLE ABSOLUE ailleurs dans ce module).
+_WINNING_SCORE_CAP_WITH_CRITICAL_ALERTS = 3
 
 # Chaînes localisées pour tout ce qui est généré côté SERVEUR (pas par l'IA) : filet de
 # sécurité local et repli en cas d'échec IA. Sans ceci, ces messages resteraient toujours
@@ -63,6 +70,19 @@ _STRINGS = {
         "recommendation_downgraded": (
             "Recommandation ajustée automatiquement en CAUTION suite à la détection de mots-clés à risque."
         ),
+        "fallback_decision_reasons": ["analyse IA indisponible"],
+        "fallback_winning_product_explanation": (
+            "Analyse IA indisponible : score produit gagnant non évaluable pour le moment."
+        ),
+        "fallback_competition_explanation": (
+            "Analyse IA indisponible : niveau de concurrence non évaluable pour le moment."
+        ),
+        "fallback_market_positioning_explanation": (
+            "Analyse IA indisponible : positionnement marché non évaluable pour le moment."
+        ),
+        "fallback_resale_ease_explanation": (
+            "Analyse IA indisponible : facilité de revente non évaluable pour le moment."
+        ),
     },
     "en": {
         "fallback_warning": (
@@ -98,6 +118,19 @@ _STRINGS = {
         "recommendation_downgraded": (
             "Recommendation automatically downgraded to CAUTION due to a detected risky keyword."
         ),
+        "fallback_decision_reasons": ["AI analysis unavailable"],
+        "fallback_winning_product_explanation": (
+            "AI analysis unavailable: winning product score cannot be evaluated right now."
+        ),
+        "fallback_competition_explanation": (
+            "AI analysis unavailable: competition level cannot be evaluated right now."
+        ),
+        "fallback_market_positioning_explanation": (
+            "AI analysis unavailable: market positioning cannot be evaluated right now."
+        ),
+        "fallback_resale_ease_explanation": (
+            "AI analysis unavailable: resale ease cannot be evaluated right now."
+        ),
     },
 }
 
@@ -132,15 +165,22 @@ def _fallback_result(language: str) -> dict:
         "commercial_estimate": {
             "possible": False,
             "reason_if_not_possible": s["fallback_financial_reason"],
+            "purchase_price_cny": None,
+            "estimated_transport_cny": None,
+            "estimated_customs_cny": None,
+            "misc_fees_cny": None,
+            "suggested_resale_price_fcfa": None,
+            "landed_cost_fcfa": None,
+            "estimated_profit_fcfa": None,
+            "margin_percentage": None,
+            "roi_percentage": None,
+            "commercial_potential": "low",
             "purchase_price_eur": None,
             "estimated_transport_eur": None,
             "estimated_customs_eur": None,
-            "landed_cost_eur": None,
             "suggested_resale_price_eur": None,
+            "landed_cost_eur": None,
             "estimated_profit_eur": None,
-            "margin_percentage": None,
-            "estimated_profit_fcfa": None,
-            "commercial_potential": "low",
         },
         "supplier_reliability": "no",
         "margin_potential": "low",
@@ -152,6 +192,17 @@ def _fallback_result(language: str) -> dict:
         "demand_level": "medium",
         "demand_explanation": s["fallback_demand_explanation"],
         "quick_report": list(s["fallback_quick_report"]),
+        "decision_reasons": list(s["fallback_decision_reasons"]),
+        "winning_product_score": 0,
+        "winning_product_explanation": s["fallback_winning_product_explanation"],
+        "competition_level": "medium",
+        "competition_explanation": s["fallback_competition_explanation"],
+        "data_confidence": {"price": 0, "specifications": 0, "photos": 0, "reviews": 0, "ocr": 0},
+        "average_market_price": None,
+        "market_positioning": "unknown",
+        "market_positioning_explanation": s["fallback_market_positioning_explanation"],
+        "resale_ease_rating": 1,
+        "resale_ease_explanation": s["fallback_resale_ease_explanation"],
         # decision_badge/risk_level/import_decision : simples valeurs par défaut, toujours
         # recalculées par `_apply_local_safety_net()` (appelée juste après dans tous les cas).
         "decision_badge": "caution",
@@ -288,6 +339,51 @@ def _normalize_demand_level(raw_value) -> str:
     return value if value in _VALID_DEMAND_LEVELS else "medium"
 
 
+def _normalize_competition_level(raw_value) -> str:
+    value = str(raw_value or "").strip().lower()
+    return value if value in _VALID_COMPETITION_LEVELS else "medium"
+
+
+def _normalize_market_positioning(raw_value) -> str:
+    value = str(raw_value or "").strip().lower()
+    return value if value in _VALID_MARKET_POSITIONING else "unknown"
+
+
+def _normalize_decision_reasons(raw: dict) -> list[str]:
+    items = raw.get("decision_reasons")
+    if not isinstance(items, list):
+        return []
+    return [str(item).strip() for item in items if str(item).strip()][:_MAX_DECISION_REASONS]
+
+
+def _clamp_winning_score(value) -> int:
+    try:
+        v = int(value)
+    except (TypeError, ValueError):
+        return 5
+    return max(0, min(10, v))
+
+
+def _normalize_data_confidence(raw: dict) -> dict:
+    def _clamp_pct(value) -> int:
+        try:
+            v = int(value)
+        except (TypeError, ValueError):
+            return 0
+        return max(0, min(100, v))
+
+    raw_confidence = raw.get("data_confidence")
+    if not isinstance(raw_confidence, dict):
+        raw_confidence = {}
+    return {
+        "price": _clamp_pct(raw_confidence.get("price")),
+        "specifications": _clamp_pct(raw_confidence.get("specifications")),
+        "photos": _clamp_pct(raw_confidence.get("photos")),
+        "reviews": _clamp_pct(raw_confidence.get("reviews")),
+        "ocr": _clamp_pct(raw_confidence.get("ocr")),
+    }
+
+
 def _normalize_market_comparisons(raw: dict) -> list[dict]:
     items = raw.get("market_comparisons")
     if not isinstance(items, list):
@@ -308,63 +404,115 @@ def _normalize_market_comparisons(raw: dict) -> list[dict]:
 
 def _normalize_commercial_estimate(raw: dict, profit_score: int, language: str) -> tuple[dict, str]:
     """
-    Normalise l'estimation commerciale/financière : l'IA ne fournit que 4 montants "input" en
-    euros (purchase_price_eur, estimated_transport_eur, estimated_customs_eur,
-    suggested_resale_price_eur) ; TOUTE l'arithmétique dérivée (coût rendu, bénéfice, marge %,
-    conversion FCFA au taux fixe réel) est calculée ici, jamais par l'IA.
+    Normalise l'estimation commerciale/financière. L'IA ne fournit que des montants "input" :
+    - Pipeline PRIMAIRE (yuan -> FCFA, public cible africain) : purchase_price_cny,
+      estimated_transport_cny, estimated_customs_cny, misc_fees_cny, suggested_resale_price_fcfa.
+    - Pipeline SECONDAIRE (euro, repli v1.1) : purchase_price_eur, estimated_transport_eur,
+      estimated_customs_eur, suggested_resale_price_eur.
+    TOUTE l'arithmétique dérivée (coût rendu, bénéfice, marge %, ROI, conversion FCFA) est
+    calculée ici, jamais par l'IA. Les deux pipelines sont calculés indépendamment quand leurs
+    données sont disponibles (aucun n'écrase l'autre) ; si le pipeline yuan n'a pas assez de
+    données, le pipeline euro sert de repli pour peupler les champs FCFA (conversion via la
+    parité fixe réelle EUR/XOF) afin que la carte "Calculateur Import" reste renseignée.
 
     Retourne (commercial_estimate_dict, margin_potential). "margin_potential" est dérivé de
-    margin_percentage quand une marge concrète est calculable (seuils réels réutilisés de
-    app.services.import_estimate_service, la même règle métier que le calculateur d'import
-    manuel) ; sinon repli sur le score de profit IA (mêmes seuils que ScoreBadge.jsx : 70/40).
+    margin_percentage (priorité au calcul yuan, plus réaliste que le calcul euro) quand une marge
+    concrète est calculable (seuils réels réutilisés de app.services.import_estimate_service, la
+    même règle métier que le calculateur d'import manuel) ; sinon repli sur le score de profit IA
+    (mêmes seuils que ScoreBadge.jsx : 70/40).
     """
     raw_estimate = raw.get("commercial_estimate")
     if not isinstance(raw_estimate, dict):
         raw_estimate = {}
 
-    purchase_price = _clamp_optional_float(raw_estimate.get("purchase_price_eur"))
-    transport = _clamp_optional_float(raw_estimate.get("estimated_transport_eur"))
-    customs = _clamp_optional_float(raw_estimate.get("estimated_customs_eur"))
-    resale_price = _clamp_optional_float(raw_estimate.get("suggested_resale_price_eur"))
+    # --- Pipeline primaire : yuan (source réelle des plateformes chinoises) -> FCFA ---
+    purchase_cny = _clamp_optional_float(raw_estimate.get("purchase_price_cny"))
+    transport_cny = _clamp_optional_float(raw_estimate.get("estimated_transport_cny"))
+    customs_cny = _clamp_optional_float(raw_estimate.get("estimated_customs_cny"))
+    misc_cny = _clamp_optional_float(raw_estimate.get("misc_fees_cny"))
+    resale_fcfa = _clamp_optional_float(raw_estimate.get("suggested_resale_price_fcfa"))
+
+    # --- Pipeline secondaire : euro (repli v1.1) ---
+    purchase_eur = _clamp_optional_float(raw_estimate.get("purchase_price_eur"))
+    transport_eur = _clamp_optional_float(raw_estimate.get("estimated_transport_eur"))
+    customs_eur = _clamp_optional_float(raw_estimate.get("estimated_customs_eur"))
+    resale_eur = _clamp_optional_float(raw_estimate.get("suggested_resale_price_eur"))
+
     reason_if_not_possible = raw_estimate.get("reason_if_not_possible") or None
+    ai_says_possible = bool(raw_estimate.get("possible", False))
+    possible_cny = ai_says_possible and purchase_cny is not None
+    possible_eur = ai_says_possible and purchase_eur is not None
+    possible = possible_cny or possible_eur
 
-    possible = bool(raw_estimate.get("possible", False)) and purchase_price is not None
-
-    landed_cost = None
-    profit = None
-    margin_pct = None
+    landed_cost_fcfa = None
     profit_fcfa = None
-    margin_potential = _margin_potential(profit_score)  # repli par défaut
+    margin_pct_cny = None
+    landed_cost_eur = None
+    profit_eur = None
+    margin_pct_eur = None
+    roi_pct = None
 
-    if possible:
-        landed_cost = purchase_price + (transport or 0.0) + (customs or 0.0)
-        if resale_price is not None and resale_price > 0:
-            profit = resale_price - landed_cost
-            margin_pct = (profit / resale_price) * 100
-            profit_fcfa = round(profit * settings.IMPORT_EUR_XOF_RATE)
-            if margin_pct >= MARGIN_THRESHOLD_BUY_PCT:
-                margin_potential = "high"
-            elif margin_pct < MARGIN_THRESHOLD_AVOID_PCT:
-                margin_potential = "low"
-            else:
-                margin_potential = "medium"
-    else:
-        purchase_price = transport = customs = resale_price = None
+    if possible_cny:
+        landed_cost_fcfa = (
+            purchase_cny + (transport_cny or 0.0) + (customs_cny or 0.0) + (misc_cny or 0.0)
+        ) * settings.IMPORT_CNY_XOF_RATE
+        if resale_fcfa is not None and resale_fcfa > 0:
+            profit_fcfa_float = resale_fcfa - landed_cost_fcfa
+            profit_fcfa = round(profit_fcfa_float)
+            margin_pct_cny = (profit_fcfa_float / resale_fcfa) * 100
+            if landed_cost_fcfa > 0:
+                roi_pct = (profit_fcfa_float / landed_cost_fcfa) * 100
+
+    if possible_eur:
+        landed_cost_eur = purchase_eur + (transport_eur or 0.0) + (customs_eur or 0.0)
+        if resale_eur is not None and resale_eur > 0:
+            profit_eur = resale_eur - landed_cost_eur
+            margin_pct_eur = (profit_eur / resale_eur) * 100
+
+    # Repli : si le pipeline yuan n'a pas produit de chiffres FCFA exploitables, utiliser le
+    # pipeline euro converti via la parité fixe réelle EUR/XOF (comportement v1.1 conservé).
+    if landed_cost_fcfa is None and landed_cost_eur is not None:
+        landed_cost_fcfa = landed_cost_eur * settings.IMPORT_EUR_XOF_RATE
+    if profit_fcfa is None and profit_eur is not None:
+        profit_fcfa = round(profit_eur * settings.IMPORT_EUR_XOF_RATE)
+        if roi_pct is None and landed_cost_eur:
+            roi_pct = (profit_eur / landed_cost_eur) * 100
+
+    margin_pct = margin_pct_cny if margin_pct_cny is not None else margin_pct_eur
+    margin_potential = _margin_potential(profit_score)  # repli par défaut
+    if margin_pct is not None:
+        if margin_pct >= MARGIN_THRESHOLD_BUY_PCT:
+            margin_potential = "high"
+        elif margin_pct < MARGIN_THRESHOLD_AVOID_PCT:
+            margin_potential = "low"
+        else:
+            margin_potential = "medium"
+
+    if not possible:
+        purchase_cny = transport_cny = customs_cny = misc_cny = resale_fcfa = None
+        purchase_eur = transport_eur = customs_eur = resale_eur = None
         reason_if_not_possible = reason_if_not_possible or _strings(language)["insufficient_price_data"]
 
     return (
         {
             "possible": possible,
             "reason_if_not_possible": reason_if_not_possible,
-            "purchase_price_eur": round(purchase_price, 2) if purchase_price is not None else None,
-            "estimated_transport_eur": round(transport, 2) if transport is not None else None,
-            "estimated_customs_eur": round(customs, 2) if customs is not None else None,
-            "landed_cost_eur": round(landed_cost, 2) if landed_cost is not None else None,
-            "suggested_resale_price_eur": round(resale_price, 2) if resale_price is not None else None,
-            "estimated_profit_eur": round(profit, 2) if profit is not None else None,
-            "margin_percentage": round(margin_pct, 2) if margin_pct is not None else None,
+            "purchase_price_cny": round(purchase_cny, 2) if purchase_cny is not None else None,
+            "estimated_transport_cny": round(transport_cny, 2) if transport_cny is not None else None,
+            "estimated_customs_cny": round(customs_cny, 2) if customs_cny is not None else None,
+            "misc_fees_cny": round(misc_cny, 2) if misc_cny is not None else None,
+            "suggested_resale_price_fcfa": round(resale_fcfa, 2) if resale_fcfa is not None else None,
+            "landed_cost_fcfa": round(landed_cost_fcfa, 2) if landed_cost_fcfa is not None else None,
             "estimated_profit_fcfa": profit_fcfa,
+            "margin_percentage": round(margin_pct, 2) if margin_pct is not None else None,
+            "roi_percentage": round(roi_pct, 2) if roi_pct is not None else None,
             "commercial_potential": margin_potential,
+            "purchase_price_eur": round(purchase_eur, 2) if purchase_eur is not None else None,
+            "estimated_transport_eur": round(transport_eur, 2) if transport_eur is not None else None,
+            "estimated_customs_eur": round(customs_eur, 2) if customs_eur is not None else None,
+            "suggested_resale_price_eur": round(resale_eur, 2) if resale_eur is not None else None,
+            "landed_cost_eur": round(landed_cost_eur, 2) if landed_cost_eur is not None else None,
+            "estimated_profit_eur": round(profit_eur, 2) if profit_eur is not None else None,
         },
         margin_potential,
     )
@@ -428,6 +576,21 @@ def _normalize_ai_result(raw: dict, language: str = DEFAULT_LANGUAGE) -> dict:
         "demand_level": _normalize_demand_level(raw.get("demand_level")),
         "demand_explanation": str(raw.get("demand_explanation", "") or "").strip(),
         "quick_report": [str(item) for item in (raw.get("quick_report") or [])],
+        "decision_reasons": _normalize_decision_reasons(raw),
+        "winning_product_score": _clamp_winning_score(raw.get("winning_product_score")),
+        "winning_product_explanation": str(raw.get("winning_product_explanation", "") or "").strip(),
+        "competition_level": _normalize_competition_level(raw.get("competition_level")),
+        "competition_explanation": str(raw.get("competition_explanation", "") or "").strip(),
+        "data_confidence": _normalize_data_confidence(raw),
+        "average_market_price": (str(raw.get("average_market_price")).strip() or None)
+        if raw.get("average_market_price")
+        else None,
+        "market_positioning": _normalize_market_positioning(raw.get("market_positioning")),
+        "market_positioning_explanation": str(
+            raw.get("market_positioning_explanation", "") or ""
+        ).strip(),
+        "resale_ease_rating": _clamp_rating(raw.get("resale_ease_rating")),
+        "resale_ease_explanation": str(raw.get("resale_ease_explanation", "") or "").strip(),
     }
 
     # Résumé compact sur une ligne, calculé STRICTEMENT côté serveur (jamais par l'IA),
@@ -500,6 +663,12 @@ def _apply_local_safety_net(result: dict, raw_text: str, language: str = DEFAULT
         result["commercial_potential_rating"],
         result["critical_alerts"],
     )
+
+    # Garde-fou serveur (ne fait jamais confiance uniquement à l'instruction prompt) : une
+    # contradiction factuelle avérée plafonne le potentiel "produit gagnant", quel que soit le
+    # score renvoyé par l'IA.
+    if result["critical_alerts"] and result["winning_product_score"] > _WINNING_SCORE_CAP_WITH_CRITICAL_ALERTS:
+        result["winning_product_score"] = _WINNING_SCORE_CAP_WITH_CRITICAL_ALERTS
 
     return result
 

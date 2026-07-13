@@ -284,3 +284,25 @@ def test_analyze_multi_capture_ocr_failure_is_tolerant(mocked_pipeline):
     assert captures_detail[0]["ocr_excerpt"] == ""
     assert captures_detail[1]["ocr_failed"] is False
     assert result["categories_covered"] == ["shop"]
+
+
+def test_ocr_data_confidence_overrides_ai_estimate_with_real_success_ratio(mocked_pipeline):
+    """v1.2 : data_confidence["ocr"] doit refléter le taux RÉEL de captures exploitées avec
+    succès par l'OCR (donnée déterministe), pas l'estimation IA (qui ne peut que deviner)."""
+    from ai_engine.services.ocr_service import OCRError
+
+    mock_extract, mock_phash, mock_mistral = mocked_pipeline
+    mock_mistral.chat_completion_json.return_value = {
+        **_valid_raw_ai_result(),
+        "data_confidence": {"price": 90, "specifications": 80, "photos": 50, "reviews": 70, "ocr": 20},
+    }
+    # 1 échec sur 4 captures -> taux réel de succès = 75%
+    mock_extract.side_effect = ["texte 1", OCRError("échec"), "texte 3", "texte 4"]
+    mock_phash.side_effect = ["0000000000000000", "1111111111111111", "2222222222222222", "3333333333333333"]
+
+    captures = [(f"c{i}.png", b"fake-bytes") for i in range(4)]
+    result = analyze_multi_capture(captures, category_hints=None)
+
+    assert result["data_confidence"]["ocr"] == 75
+    # Les autres catégories de confiance restent celles renvoyées par l'IA, inchangées.
+    assert result["data_confidence"]["price"] == 90

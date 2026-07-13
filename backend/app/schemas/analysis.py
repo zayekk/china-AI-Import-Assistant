@@ -42,10 +42,16 @@ class CommercialEstimate(BaseModel):
     Analyse financière (coût d'achat/transport/douane -> coût rendu -> revente -> bénéfice/marge),
     ou marquée impossible si le texte source ne contient aucune donnée de prix exploitable.
 
-    L'IA ne fournit que les 4 montants "input" (purchase_price_eur, estimated_transport_eur,
-    estimated_customs_eur, suggested_resale_price_eur) : tous les montants dérivés
-    (landed_cost_eur, estimated_profit_eur, margin_percentage, estimated_profit_fcfa,
-    commercial_potential) sont calculés STRICTEMENT côté serveur (voir
+    Pipeline PRIMAIRE (v1.2) : yuan (¥, devise réelle des plateformes chinoises) côté achat ->
+    FCFA (devise de revente locale en Afrique de l'Ouest/Centrale) côté résultat, via le taux
+    HEURISTIQUE settings.IMPORT_CNY_XOF_RATE (1¥ = 100 FCFA par défaut — voir sa docstring).
+    Pipeline SECONDAIRE (v1.1, conservé pour compatibilité) : euro, utilisé en repli si l'IA n'a
+    trouvé aucun prix en yuan.
+
+    L'IA ne fournit que les montants "input" (purchase_price_cny/eur, estimated_transport_cny/eur,
+    estimated_customs_cny/eur, misc_fees_cny, suggested_resale_price_fcfa/eur) : tous les montants
+    dérivés (landed_cost, estimated_profit, margin_percentage, roi_percentage,
+    estimated_profit_fcfa, commercial_potential) sont calculés STRICTEMENT côté serveur (voir
     ai_engine/services/product_analysis_service.py::_normalize_commercial_estimate) pour
     garantir une arithmétique cohérente, jamais sujette aux approximations de calcul de l'IA.
     """
@@ -53,21 +59,49 @@ class CommercialEstimate(BaseModel):
     possible: bool = False
     reason_if_not_possible: str | None = None
 
-    # --- Fournis par l'IA (estimations, jamais des faits confirmés) ---
+    # --- Fournis par l'IA : pipeline primaire (yuan -> FCFA), estimations jamais des faits ---
+    purchase_price_cny: float | None = None
+    estimated_transport_cny: float | None = None
+    estimated_customs_cny: float | None = None
+    misc_fees_cny: float | None = None
+    suggested_resale_price_fcfa: float | None = None
+
+    # --- Calculés côté serveur, pipeline primaire (FCFA) ---
+    landed_cost_fcfa: float | None = None
+    estimated_profit_fcfa: int | None = None
+    margin_percentage: float | None = None
+    # Retour sur investissement = bénéfice / coût rendu * 100.
+    roi_percentage: float | None = None
+    # Calculé à partir de margin_percentage si disponible, sinon de profit_score (repli) —
+    # toujours cohérent avec "margin_potential" du résumé rapide (même valeur).
+    commercial_potential: Literal["low", "medium", "high"] | None = None
+
+    # --- Fournis par l'IA : pipeline secondaire (euro), repli si aucun prix en yuan disponible ---
     purchase_price_eur: float | None = None
     estimated_transport_eur: float | None = None
     estimated_customs_eur: float | None = None
     suggested_resale_price_eur: float | None = None
 
-    # --- Calculés côté serveur ---
+    # --- Calculés côté serveur, pipeline secondaire (euro) ---
     landed_cost_eur: float | None = None
     estimated_profit_eur: float | None = None
-    margin_percentage: float | None = None
-    # Conversion au taux FIXE réel EUR/XOF (settings.IMPORT_EUR_XOF_RATE), pas une estimation.
-    estimated_profit_fcfa: int | None = None
-    # Calculé à partir de margin_percentage si disponible, sinon de profit_score (repli) —
-    # toujours cohérent avec "margin_potential" du résumé rapide (même valeur).
-    commercial_potential: Literal["low", "medium", "high"] | None = None
+
+
+class DataConfidence(BaseModel):
+    """
+    Confiance de l'IA par catégorie de donnée (distincte de "confidence_score" qui reflète la
+    confiance GLOBALE) : permet à l'utilisateur de savoir quelles informations sont les plus
+    fiables. "photos" reste structurellement prudent : le pipeline actuel n'envoie que du texte
+    OCR à l'IA, jamais l'image elle-même — voir la règle prompt correspondante.
+    """
+
+    price: int = Field(default=0, ge=0, le=100)
+    specifications: int = Field(default=0, ge=0, le=100)
+    photos: int = Field(default=0, ge=0, le=100)
+    reviews: int = Field(default=0, ge=0, le=100)
+    # Pour une analyse multi-captures, écrasé côté serveur par le taux réel de captures
+    # exploitées avec succès par l'OCR (voir multi_capture_service.py) plutôt que l'estimation IA.
+    ocr: int = Field(default=0, ge=0, le=100)
 
 
 class MarketComparison(BaseModel):
@@ -146,6 +180,30 @@ class AIAnalysisResult(BaseModel):
     # sans information nouvelle (voir règle prompt correspondante).
     quick_report: list[str] = Field(default_factory=list)
 
+    # --- v1.2 : raisons de la décision, winning product, concurrence, confiance par catégorie,
+    # positionnement marché, facilité de revente ---
+
+    # Jusqu'à 5 raisons courtes ("vendeur fiable", "faible marge"...), générées par l'IA à partir
+    # de constats déjà présents ailleurs dans la réponse.
+    decision_reasons: list[str] = Field(default_factory=list)
+
+    winning_product_score: int = Field(default=5, ge=0, le=10)
+    winning_product_explanation: str = ""
+
+    competition_level: Literal["low", "medium", "high", "very_high"] = "medium"
+    competition_explanation: str = ""
+
+    data_confidence: DataConfidence = Field(default_factory=DataConfidence)
+
+    average_market_price: str | None = None
+    market_positioning: Literal["premium", "mid_range", "entry_level", "saturated", "unknown"] = (
+        "unknown"
+    )
+    market_positioning_explanation: str = ""
+
+    resale_ease_rating: int = Field(default=3, ge=1, le=5)
+    resale_ease_explanation: str = ""
+
 
 class AnalysisOut(BaseModel):
     id: uuid.UUID
@@ -187,6 +245,18 @@ class AnalysisOut(BaseModel):
     demand_level: str | None = None
     demand_explanation: str | None = None
     quick_report: list[str] | None = None
+
+    decision_reasons: list[str] | None = None
+    winning_product_score: int | None = None
+    winning_product_explanation: str | None = None
+    competition_level: str | None = None
+    competition_explanation: str | None = None
+    data_confidence: dict | None = None
+    average_market_price: str | None = None
+    market_positioning: str | None = None
+    market_positioning_explanation: str | None = None
+    resale_ease_rating: int | None = None
+    resale_ease_explanation: str | None = None
 
     model_config = {"from_attributes": True}
 

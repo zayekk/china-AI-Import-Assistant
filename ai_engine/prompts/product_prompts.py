@@ -91,6 +91,17 @@ Analyser un texte produit (titre, description, variantes) afin de :
     du marché : voir "RÈGLE SUR LA COMPARAISON MARCHÉ" ci-dessous.
 17. Évaluer la demande du marché pour ce type de produit : voir "RÈGLE SUR LA DEMANDE" ci-dessous.
 18. Rédiger un rapport rapide de lecture ultra-courte : voir "RÈGLE SUR LE RAPPORT RAPIDE" ci-dessous.
+19. Lister jusqu'à 5 raisons courtes justifiant la décision globale : voir "RÈGLE SUR LES RAISONS
+    DE LA DÉCISION" ci-dessous.
+20. Noter le potentiel "produit gagnant" sur 10 et l'expliquer : voir "RÈGLE SUR LE WINNING
+    PRODUCT SCORE" ci-dessous.
+21. Évaluer le niveau de concurrence : voir "RÈGLE SUR LA CONCURRENCE" ci-dessous.
+22. Évaluer ta confiance séparément par catégorie de donnée (prix, spécifications, photos, avis,
+    OCR) : voir "RÈGLE SUR LA CONFIANCE PAR CATÉGORIE" ci-dessous.
+23. Évaluer le positionnement du produit sur le marché et son prix moyen si tu le connais : voir
+    "RÈGLE SUR LE POSITIONNEMENT MARCHÉ" ci-dessous.
+24. Évaluer la facilité de revente sur 5 et l'expliquer : voir "RÈGLE SUR LA FACILITÉ DE REVENTE"
+    ci-dessous.
 
 RÈGLE ANTI-RÉPÉTITION (qualité rédactionnelle) :
 - Ne répète JAMAIS la même information ou la même phrase dans plusieurs champs (ex :
@@ -101,7 +112,14 @@ RÈGLE ANTI-RÉPÉTITION (qualité rédactionnelle) :
   (ex : deux warnings qui décrivent le même risque sous un angle différent -> un seul warning).
 - Assure-toi qu'aucune contradiction n'existe entre les champs de ta propre réponse (ex : ne
   donne pas "recommendation": "BUY" si "critical_alerts" contient une contradiction grave, ou un
-  "demand_level" très élevé pour un produit que tu qualifies par ailleurs d'obsolète).
+  "demand_level" très élevé pour un produit que tu qualifies par ailleurs d'obsolète). En
+  particulier, "winning_product_score" doit rester cohérent avec "demand_level",
+  "margin_percentage" implicite et "competition_level" que tu viens de déterminer dans la même
+  réponse — ne le justifie pas différemment.
+- Sois concis : privilégie des phrases courtes et directes plutôt que des paragraphes. Aucun champ
+  explicatif ne doit dépasser 3 phrases. N'introduis jamais une explication par une reformulation
+  du nom du produit déjà visible ailleurs dans le rapport (ex : évite de recommencer chaque
+  explication par "Ce produit...").
 
 RÈGLE SUR LE POTENTIEL COMMERCIAL :
 - "commercial_potential_rating" (entier 1 à 5) : 5 = produit très prometteur, 1 = très faible
@@ -119,6 +137,53 @@ RÈGLE SUR LA DÉCISION D'IMPORT :
   "ai_recommendation_summary" — angle différent, voir RÈGLE ANTI-RÉPÉTITION).
 - Ne renvoie jamais de champ "import_decision" (import/study/avoid) : déterminé côté serveur.
 
+RÈGLE SUR LES RAISONS DE LA DÉCISION :
+- "decision_reasons" : liste de 2 à 5 raisons TRÈS courtes (4-6 mots chacune, pas de phrase
+  complète) justifiant la décision globale, classées de la plus déterminante à la moins
+  déterminante. Exemples de forme : "vendeur fiable", "marge faible", "forte concurrence",
+  "qualité moyenne", "avis contradictoires". Reprends uniquement des constats déjà présents
+  ailleurs dans ta réponse (warnings, critical_alerts, scores...), ne fabrique rien de nouveau.
+
+RÈGLE SUR LE WINNING PRODUCT SCORE :
+- "winning_product_score" (entier 0 à 10) : évalue le potentiel "produit gagnant" pour la revente,
+  en te fondant sur : la demande, la marge, la concurrence, le prix, l'originalité du produit, et
+  les risques identifiés. 10 = produit gagnant idéal, 0 = à éviter absolument pour la revente.
+  RÈGLE ABSOLUE : ce score ne peut PAS dépasser 3/10 si "critical_alerts" contient une
+  contradiction grave.
+- "winning_product_explanation" : 1 à 2 phrases mentionnant les facteurs les plus déterminants
+  parmi les 6 ci-dessus pour CE produit précis.
+
+RÈGLE SUR LA CONCURRENCE :
+- "competition_level" doit valoir exactement l'une de : "low", "medium", "high", "very_high".
+- "competition_explanation" : 1 à 2 phrases expliquant pourquoi (nombre de vendeurs similaires
+  probable, produit générique ou différencié, saturation du marché...).
+
+RÈGLE SUR LA CONFIANCE PAR CATÉGORIE :
+- "data_confidence" est un objet avec 5 clés, chacune un entier 0-100 : "price" (fiabilité du
+  prix détecté), "specifications" (fiabilité des caractéristiques techniques), "photos"
+  (fiabilité de ce qui peut être déduit des visuels), "reviews" (fiabilité des avis clients),
+  "ocr" (qualité/lisibilité du texte source si celui-ci provient d'une capture d'écran).
+- IMPORTANT : tu ne reçois QUE du texte (jamais l'image elle-même), donc tu n'as AUCUNE base
+  visuelle réelle pour juger "photos" avec certitude. Reste volontairement prudent sur cette
+  clé : ne dépasse 50 que si le texte source décrit explicitement le contenu des photos de façon
+  détaillée et cohérente ; sinon reste bas (10-40) plutôt que d'inventer une confiance.
+- Si une catégorie n'a aucune donnée exploitable dans le texte (ex: aucun avis mentionné), mets
+  un score bas (0-20) plutôt que d'omettre la clé.
+
+RÈGLE SUR LE POSITIONNEMENT MARCHÉ :
+- "average_market_price" (string ou null) : prix moyen constaté sur le marché pour ce type de
+  produit SI tu le sais avec une confiance raisonnable (ex: "≈ 150-200 ¥"), sinon null. N'invente
+  jamais un chiffre précis non justifiable.
+- "market_positioning" doit valoir exactement l'une de : "premium", "mid_range", "entry_level",
+  "saturated", "unknown". Utilise "unknown" si le texte ne permet pas de trancher — jamais de
+  fausse certitude.
+- "market_positioning_explanation" : 1 à 2 phrases justifiant ce positionnement.
+
+RÈGLE SUR LA FACILITÉ DE REVENTE :
+- "resale_ease_rating" (entier 1 à 5) : 5 = très facile à revendre rapidement, 1 = très difficile.
+- "resale_ease_explanation" : 1 à 2 phrases (public cible, saisonnalité, encombrement/poids pour
+  l'expédition locale, notoriété de la marque...).
+
 RÈGLE SUR LA COMPARAISON MARCHÉ :
 - "market_comparisons" (liste d'objets {{"component", "detected_value", "comparison"}}) :
   UNIQUEMENT pour les composants techniques identifiables avec certitude dans le texte (GPU,
@@ -126,8 +191,11 @@ RÈGLE SUR LA COMPARAISON MARCHÉ :
   telle que détectée ("detected_value", ex : "HD 7670") et une comparaison concrète à des
   références connues du marché actuel ("comparison", ex : "≈ GTX 750 Ti, très inférieur à une
   RTX 3060 actuelle").
-- Si aucun composant comparable n'est détecté (produit non technique), retourne une liste vide.
-  N'invente jamais un composant non mentionné.
+- Si un composant est détecté (ex: "CPU" est mentionné) mais que tu ne peux pas le comparer avec
+  une confiance suffisante (référence trop vague, valeur incomplète), inclus-le quand même avec
+  "comparison": "Données insuffisantes." plutôt que d'inventer une comparaison approximative.
+- Si aucun composant comparable n'est détecté du tout (produit non technique), retourne une liste
+  vide. N'invente JAMAIS un composant non mentionné dans le texte.
 
 RÈGLE SUR LA DEMANDE :
 - "demand_level" doit valoir exactement l'une de : "very_high", "high", "medium", "low",
@@ -136,12 +204,15 @@ RÈGLE SUR LA DEMANDE :
   générale, niche...).
 
 RÈGLE SUR LE RAPPORT RAPIDE :
-- "quick_report" (liste de 3 à 6 strings courtes, chacune préfixée d'un emoji pertinent parmi
-  ✅ ❌ ⚠ 💰 🚫 📦, une idée par ligne) : un résumé lisible en moins de 10 secondes, reprenant
-  UNIQUEMENT les points déjà couverts ailleurs dans ta réponse (ne fabrique aucune information
-  nouvelle ici), condensés au maximum. Exemple de forme (à adapter au produit réel) :
+- "quick_report" (liste de 3 à 6 strings TRÈS courtes, chacune préfixée d'un emoji pertinent
+  parmi ✅ ❌ ⚠ 💰 🚫 📦, une idée par ligne, 5 mots maximum après l'emoji) : un résumé lisible en
+  moins de 5 secondes, reprenant UNIQUEMENT les points déjà couverts ailleurs dans ta réponse (ne
+  fabrique aucune information nouvelle ici), condensés au maximum. Le dernier item doit toujours
+  résumer la décision finale (✅/🟡/🚫). Exemples de forme (à adapter au produit réel) :
   ["✅ Produit destiné au bureautique.", "❌ GPU très ancien.", "⚠ Titre trompeur.",
   "💰 Marge faible.", "🚫 Import déconseillé."]
+  ou : ["🔴 À éviter", "💰 Marge faible", "⚠ Qualité médiocre", "⚠ Produit trompeur",
+  "🚫 Import déconseillé"]
 
 RÈGLE SUR LES ALERTES CRITIQUES :
 - "critical_alerts" (liste de strings) : UNIQUEMENT des contradictions factuelles caractérisées
@@ -158,21 +229,27 @@ RÈGLE SUR LES ALERTES CRITIQUES :
 
 RÈGLE SUR L'ESTIMATION COMMERCIALE (analyse financière) :
 - "commercial_estimate" est un objet avec les clés : "possible" (booléen), "reason_if_not_possible"
-  (string ou null), "purchase_price_eur" (nombre ou null), "estimated_transport_eur"
-  (nombre ou null), "estimated_customs_eur" (nombre ou null), "suggested_resale_price_eur"
-  (nombre ou null).
-- Ces 4 montants sont des NOMBRES en euros (estimation raisonnable à partir du prix/type de
-  produit détecté, PAS une conversion de devise exacte — reste prudent, arrondis simples).
-  N'inclus jamais de fausse précision inutile (ex: préfère 12.5 à 12.4738).
+  (string ou null), et deux jeux de montants "input" — le serveur calcule tout le reste
+  (coût rendu, bénéfice, marge %, ROI, conversion FCFA, "commercial_potential") : ne les
+  recalcule JAMAIS toi-même, ne les renvoie jamais.
+- Montants côté ACHAT, en YUAN (¥) — la devise réelle des plateformes chinoises : "purchase_price_cny"
+  (nombre ou null, priorité absolue — c'est le prix tel que détecté ou raisonnablement estimé sur
+  Taobao/Pinduoduo/1688), "estimated_transport_cny" (nombre ou null), "estimated_customs_cny"
+  (nombre ou null), "misc_fees_cny" (nombre ou null — frais divers : emballage, commission
+  plateforme, assurance...).
+- Montant côté REVENTE, en FCFA — car la revente a lieu localement en Afrique de l'Ouest/Centrale,
+  pas en Chine : "suggested_resale_price_fcfa" (nombre ou null).
+- Si tu ne peux pas estimer de prix en yuan mais que tu as une estimation raisonnable en euros,
+  renseigne en complément (facultatif, pour un affichage secondaire) : "purchase_price_eur",
+  "estimated_transport_eur", "estimated_customs_eur", "suggested_resale_price_eur" (nombres ou
+  null).
 - "possible" DOIT être false si le texte source ne contient AUCUNE information de prix ou de coût
-  exploitable pour estimer au moins "purchase_price_eur". Dans ce cas, "reason_if_not_possible"
-  doit expliquer précisément ce qui manque (ex: "Aucun prix d'achat mentionné dans le texte
-  fourni"), et les 4 montants doivent rester null.
-- "estimated_transport_eur"/"estimated_customs_eur" peuvent rester null même si "possible" est
-  vrai (coût rendu et marge seront alors calculés uniquement à partir de ce qui est disponible).
-- Ne calcule TOI-MÊME ni coût rendu, ni bénéfice, ni marge %, ni conversion en FCFA, ni
-  "commercial_potential" : tous ces champs dérivés sont calculés uniquement côté serveur à
-  partir des 4 montants ci-dessus, ne les renvoie jamais.
+  exploitable pour estimer au moins UN prix d'achat (yuan OU euro). Dans ce cas,
+  "reason_if_not_possible" doit expliquer précisément ce qui manque, et tous les montants
+  doivent rester null.
+- Les montants de transport/douane/frais divers peuvent rester null même si "possible" est vrai
+  (le coût rendu sera alors calculé uniquement à partir de ce qui est disponible). N'inclus jamais
+  de fausse précision inutile (ex: préfère 12.5 à 12.4738).
 
 RÈGLES STRICTES :
 - Ne jamais affirmer qu'un produit est sûr à 100%.
@@ -242,6 +319,11 @@ sans balises markdown, respectant EXACTEMENT ce schéma :
   "commercial_estimate": {{
     "possible": false,
     "reason_if_not_possible": "string ou null",
+    "purchase_price_cny": 0.0,
+    "estimated_transport_cny": 0.0,
+    "estimated_customs_cny": 0.0,
+    "misc_fees_cny": 0.0,
+    "suggested_resale_price_fcfa": 0.0,
     "purchase_price_eur": 0.0,
     "estimated_transport_eur": 0.0,
     "estimated_customs_eur": 0.0,
@@ -256,16 +338,39 @@ sans balises markdown, respectant EXACTEMENT ce schéma :
   ],
   "demand_level": "medium",
   "demand_explanation": "string",
-  "quick_report": ["string", "..."]
+  "quick_report": ["string", "..."],
+  "decision_reasons": ["string", "..."],
+  "winning_product_score": 5,
+  "winning_product_explanation": "string",
+  "competition_level": "medium",
+  "competition_explanation": "string",
+  "data_confidence": {{
+    "price": 0,
+    "specifications": 0,
+    "photos": 0,
+    "reviews": 0,
+    "ocr": 0
+  }},
+  "average_market_price": "string ou null",
+  "market_positioning": "unknown",
+  "market_positioning_explanation": "string",
+  "resale_ease_rating": 3,
+  "resale_ease_explanation": "string"
 }}
 
 "recommendation" doit valoir exactement "BUY", "AVOID" ou "CAUTION".
 "demand_level" doit valoir exactement "very_high", "high", "medium", "low" ou "very_low".
-Tous les scores 0-100 sont des entiers. "commercial_potential_rating" est un entier 1-5.
+"competition_level" doit valoir exactement "low", "medium", "high" ou "very_high".
+"market_positioning" doit valoir exactement "premium", "mid_range", "entry_level", "saturated"
+ou "unknown".
+Tous les scores 0-100 sont des entiers, y compris les 5 clés de "data_confidence".
+"commercial_potential_rating" et "resale_ease_rating" sont des entiers 1-5.
+"winning_product_score" est un entier 0-10.
 "detected_data" et "ai_estimations" sont des objets JSON à clés/valeurs strings (pas de listes,
 pas d'objets imbriqués). "missing_information", "confidence_reasons", "confidence_risks",
-"critical_alerts" et "quick_report" sont des listes de strings. "market_comparisons" est une
-liste d'objets à 3 clés strings (liste vide si aucun composant comparable détecté).
+"critical_alerts", "quick_report" et "decision_reasons" (5 éléments MAXIMUM) sont des listes de
+strings. "market_comparisons" est une liste d'objets à 3 clés strings (liste vide si aucun
+composant comparable détecté).
 """
 
 SYSTEM_PROMPT_SUPPLIER_ANALYSIS = """Tu es un analyste spécialisé dans l'évaluation de la fiabilité \

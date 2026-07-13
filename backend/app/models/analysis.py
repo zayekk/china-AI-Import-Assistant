@@ -89,6 +89,21 @@ class Analysis(Base):
     demand_explanation = Column(Text, nullable=True)
     quick_report = Column(JSON, nullable=True)            # liste de strings
 
+    # v1.2 : raisons de la décision, winning product, concurrence, confiance par catégorie,
+    # positionnement marché, facilité de revente — voir schémas AIAnalysisResult / DataConfidence
+    # et ai_engine/services/product_analysis_service.py.
+    decision_reasons = Column(JSON, nullable=True)         # liste de strings (5 max)
+    winning_product_score = Column(Integer, nullable=True)
+    winning_product_explanation = Column(Text, nullable=True)
+    competition_level = Column(String(10), nullable=True)
+    competition_explanation = Column(Text, nullable=True)
+    data_confidence = Column(JSON, nullable=True)           # dict DataConfidence
+    average_market_price = Column(String(200), nullable=True)
+    market_positioning = Column(String(12), nullable=True)
+    market_positioning_explanation = Column(Text, nullable=True)
+    resale_ease_rating = Column(Integer, nullable=True)
+    resale_ease_explanation = Column(Text, nullable=True)
+
     raw_ai_response = Column(JSON, nullable=True)  # réponse brute pour debug / audit
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())

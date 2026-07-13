@@ -9,10 +9,10 @@ import {
   FileSearch,
   Smartphone,
   Bot,
-  TrendingUp,
   Award,
   Activity,
   Cpu,
+  Repeat,
 } from "lucide-react";
 import clsx from "clsx";
 import RecommendationBanner from "./RecommendationBanner";
@@ -22,6 +22,12 @@ import CriticalAlertsBanner from "./CriticalAlertsBanner";
 import QuickReportBanner from "./QuickReportBanner";
 import ImportDecisionCard from "./ImportDecisionCard";
 import StarRating from "./StarRating";
+import DecisionReasonsList from "./DecisionReasonsList";
+import WinningProductBadge from "./WinningProductBadge";
+import CompetitionCard from "./CompetitionCard";
+import DataConfidenceCard from "./DataConfidenceCard";
+import MarketPositionCard from "./MarketPositionCard";
+import ImportCostCalculatorCard from "./ImportCostCalculatorCard";
 
 // Bandes de confiance : bornes STRICTEMENT alignées sur `_confidence_level()` côté serveur
 // (backend/ai_engine/services/product_analysis_service.py) : 0-30 / 31-60 / 61-80 / 81-100.
@@ -48,14 +54,6 @@ function getConfidenceBand(score) {
     CONFIDENCE_BANDS.find((band) => numericScore <= band.max) ||
     CONFIDENCE_BANDS[CONFIDENCE_BANDS.length - 1]
   );
-}
-
-function formatEur(value) {
-  return value === null || value === undefined ? "—" : `${Number(value).toFixed(2)} €`;
-}
-
-function formatFcfa(value) {
-  return value === null || value === undefined ? "—" : `${Number(value).toLocaleString("fr-FR")} FCFA`;
 }
 
 /**
@@ -103,6 +101,17 @@ export default function AnalysisResultCard({ result }) {
     demand_level,
     demand_explanation,
     quick_report = [],
+    decision_reasons = [],
+    winning_product_score,
+    winning_product_explanation,
+    competition_level,
+    competition_explanation,
+    data_confidence,
+    average_market_price,
+    market_positioning,
+    market_positioning_explanation,
+    resale_ease_rating,
+    resale_ease_explanation,
   } = result;
 
   const confidenceBand = getConfidenceBand(confidence_score);
@@ -126,6 +135,19 @@ export default function AnalysisResultCard({ result }) {
 
       {import_decision && (
         <ImportDecisionCard decision={import_decision} explanation={import_decision_explanation} />
+      )}
+
+      <DecisionReasonsList reasons={decision_reasons} />
+
+      {(winning_product_score != null || competition_level) && (
+        <div className="grid sm:grid-cols-2 gap-4">
+          {winning_product_score != null && (
+            <WinningProductBadge score={winning_product_score} explanation={winning_product_explanation} />
+          )}
+          {competition_level && (
+            <CompetitionCard level={competition_level} explanation={competition_explanation} />
+          )}
+        </div>
       )}
 
       <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 space-y-6">
@@ -166,8 +188,8 @@ export default function AnalysisResultCard({ result }) {
         <ScoreBadge label="Score final" score={final_score} />
       </div>
 
-      {(commercial_potential_rating || demand_level) && (
-        <div className="grid sm:grid-cols-2 gap-4">
+      {(commercial_potential_rating || demand_level || resale_ease_rating) && (
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {commercial_potential_rating != null && (
             <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-2">
               <h3 className="flex items-center gap-2 text-sm font-semibold text-gray-800">
@@ -193,66 +215,27 @@ export default function AnalysisResultCard({ result }) {
               {demand_explanation && <p className="text-sm text-gray-600">{demand_explanation}</p>}
             </div>
           )}
-        </div>
-      )}
 
-      {commercial_estimate && (
-        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 space-y-2">
-          <h3 className="flex items-center gap-2 text-sm font-semibold text-emerald-800">
-            <TrendingUp size={16} /> Analyse financière
-          </h3>
-          <p className="text-xs text-emerald-600 italic">Estimation générée par IA, pas une donnée confirmée</p>
-          {commercial_estimate.possible ? (
-            <dl className="grid sm:grid-cols-2 md:grid-cols-4 gap-3 mt-1">
-              <div className="text-sm text-emerald-900">
-                <dt className="text-xs font-medium text-emerald-600">Prix d'achat</dt>
-                <dd>{formatEur(commercial_estimate.purchase_price_eur)}</dd>
-              </div>
-              <div className="text-sm text-emerald-900">
-                <dt className="text-xs font-medium text-emerald-600">Transport estimé</dt>
-                <dd>{formatEur(commercial_estimate.estimated_transport_eur)}</dd>
-              </div>
-              <div className="text-sm text-emerald-900">
-                <dt className="text-xs font-medium text-emerald-600">Douane estimée</dt>
-                <dd>{formatEur(commercial_estimate.estimated_customs_eur)}</dd>
-              </div>
-              <div className="text-sm text-emerald-900">
-                <dt className="text-xs font-medium text-emerald-600">Coût rendu</dt>
-                <dd className="font-semibold">{formatEur(commercial_estimate.landed_cost_eur)}</dd>
-              </div>
-              <div className="text-sm text-emerald-900">
-                <dt className="text-xs font-medium text-emerald-600">Prix de revente conseillé</dt>
-                <dd>{formatEur(commercial_estimate.suggested_resale_price_eur)}</dd>
-              </div>
-              <div className="text-sm text-emerald-900">
-                <dt className="text-xs font-medium text-emerald-600">Bénéfice estimé</dt>
-                <dd className="font-semibold">{formatEur(commercial_estimate.estimated_profit_eur)}</dd>
-              </div>
-              <div className="text-sm text-emerald-900">
-                <dt className="text-xs font-medium text-emerald-600">Marge</dt>
-                <dd className="font-semibold">
-                  {commercial_estimate.margin_percentage != null
-                    ? `${commercial_estimate.margin_percentage}%`
-                    : "—"}
-                </dd>
-              </div>
-              <div className="text-sm text-emerald-900">
-                <dt className="text-xs font-medium text-emerald-600">Bénéfice en FCFA</dt>
-                <dd className="font-semibold">{formatFcfa(commercial_estimate.estimated_profit_fcfa)}</dd>
-              </div>
-            </dl>
-          ) : (
-            <p className="text-sm text-emerald-800 italic">
-              Estimation non disponible : {commercial_estimate.reason_if_not_possible || "données insuffisantes."}
-            </p>
+          {resale_ease_rating != null && (
+            <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-2">
+              <h3 className="flex items-center gap-2 text-sm font-semibold text-gray-800">
+                <Repeat size={16} /> Facilité de revente
+              </h3>
+              <StarRating rating={resale_ease_rating} />
+              {resale_ease_explanation && (
+                <p className="text-sm text-gray-600">{resale_ease_explanation}</p>
+              )}
+            </div>
           )}
         </div>
       )}
 
+      <ImportCostCalculatorCard estimate={commercial_estimate} />
+
       {market_comparisons.length > 0 && (
         <div>
           <h3 className="flex items-center gap-2 text-sm font-semibold text-gray-800 mb-2">
-            <Cpu size={16} /> Comparaison avec le marché
+            <Cpu size={16} /> Comparaison technique
           </h3>
           <ul className="space-y-2">
             {market_comparisons.map((item, idx) => (
@@ -267,6 +250,15 @@ export default function AnalysisResultCard({ result }) {
             ))}
           </ul>
         </div>
+      )}
+
+      {(competition_level || average_market_price || market_positioning) && (
+        <MarketPositionCard
+          competitionLevel={competition_level}
+          averageMarketPrice={average_market_price}
+          positioning={market_positioning}
+          positioningExplanation={market_positioning_explanation}
+        />
       )}
 
       <div className="grid sm:grid-cols-2 gap-6">
@@ -335,6 +327,8 @@ export default function AnalysisResultCard({ result }) {
           </ul>
         )}
       </div>
+
+      <DataConfidenceCard confidence={data_confidence} />
 
       {confidence_risks.length > 0 && (
         <div className="bg-orange-50 border border-orange-200 rounded-xl p-4">

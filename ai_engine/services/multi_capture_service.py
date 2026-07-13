@@ -217,6 +217,13 @@ def analyze_multi_capture(
 
     result = _apply_local_safety_net(result, aggregated_text, language)
 
+    # f-bis. Confiance OCR : écrase l'estimation IA (qui ne peut que deviner) par le taux réel de
+    # captures exploitées avec succès par l'OCR — donnée déterministe déjà calculée ci-dessus,
+    # bien plus fiable qu'un jugement IA sur ce point précis pour une analyse multi-captures.
+    if ocr_failed_flags:
+        successful_ratio = sum(1 for failed in ocr_failed_flags if not failed) / len(ocr_failed_flags)
+        result["data_confidence"]["ocr"] = round(successful_ratio * 100)
+
     # g. Détail de classification par capture + couverture des catégories.
     captures_detail = []
     for idx, (filename, _) in enumerate(captures):
