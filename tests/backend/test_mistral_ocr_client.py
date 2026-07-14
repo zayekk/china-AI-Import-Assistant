@@ -82,7 +82,21 @@ def test_ocr_extract_text_raises_mistral_api_error_on_auth_failure():
 
 
 def test_ocr_extract_text_requires_api_key():
-    client = MistralClient(api_key="")
+    """
+    MistralClient(api_key="") ne suffit pas à isoler ce test : __init__ fait
+    `api_key or settings.MISTRAL_API_KEY`, donc une chaîne vide retombe sur la clé réelle de
+    l'environnement si backend/.env en contient une — ce qui déclencherait un VRAI appel
+    réseau ici plutôt que de tester l'absence de clé. On neutralise explicitement
+    settings.MISTRAL_API_KEY pour rester isolé et déterministe.
+    """
+    with patch("ai_engine.services.mistral_client.settings") as mock_settings:
+        mock_settings.MISTRAL_API_KEY = ""
+        mock_settings.MISTRAL_MODEL = "mistral-large-latest"
+        mock_settings.MISTRAL_API_URL = "https://api.mistral.ai/v1/chat/completions"
+        mock_settings.MISTRAL_TIMEOUT_SECONDS = 60
+        mock_settings.MISTRAL_OCR_API_URL = "https://api.mistral.ai/v1/ocr"
+        mock_settings.MISTRAL_OCR_MODEL = "mistral-ocr-latest"
+        client = MistralClient(api_key="")
 
-    with pytest.raises(MistralAPIError):
-        client.ocr_extract_text(b"bytes")
+        with pytest.raises(MistralAPIError):
+            client.ocr_extract_text(b"bytes")

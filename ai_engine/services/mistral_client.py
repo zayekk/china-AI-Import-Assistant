@@ -163,17 +163,68 @@ class MistralClient:
         raise MistralAPIError(f"Échec de l'appel OCR à Mistral après plusieurs tentatives: {last_error}")
 
     @staticmethod
-    def _safe_json_parse(content: str) -> dict[str, Any]:
-        """Parse le JSON renvoyé par le modèle, en nettoyant d'éventuelles balises markdown."""
+    def _extract_json_object(text: str) -> str | None:
+        """
+        Extrait le premier bloc {...} équilibré du texte (comptage d'accolades, en ignorant
+        celles présentes dans les chaînes JSON). Utilisé UNIQUEMENT en repli quand le parsing
+        direct échoue (ex: le modèle a ajouté une phrase avant/après le JSON malgré le mode
+        response_format=json_object) — ne modifie jamais le contenu du JSON lui-même, se
+        contente d'en isoler les bornes exactes. Retourne None si aucun bloc équilibré trouvé.
+        """
+        start = text.find("{")
+        if start == -1:
+            return None
+
+        depth = 0
+        in_string = False
+        escaped = False
+        for idx in range(start, len(text)):
+            char = text[idx]
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == '"':
+                    in_string = False
+                continue
+            if char == '"':
+                in_string = True
+            elif char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    return text[start : idx + 1]
+        return None
+
+    @classmethod
+    def _safe_json_parse(cls, content: str) -> dict[str, Any]:
+        """
+        Parse le JSON renvoyé par le modèle, en nettoyant d'éventuelles balises markdown, avec
+        un repli qui isole le bloc {...} équilibré si le modèle a entouré le JSON de texte
+        (jamais de correction du CONTENU JSON lui-même — uniquement de ses bornes — donc aucune
+        perte de qualité/fidélité sur les champs renvoyés par l'IA).
+        """
         cleaned = content.strip()
         if cleaned.startswith("```"):
             cleaned = cleaned.strip("`")
             if cleaned.startswith("json"):
                 cleaned = cleaned[4:]
+            cleaned = cleaned.strip()
+
         try:
             return json.loads(cleaned)
-        except json.JSONDecodeError as exc:
-            raise MistralAPIError(f"Réponse IA non parsable en JSON: {exc}\nContenu: {content[:500]}")
+        except json.JSONDecodeError as first_error:
+            extracted = cls._extract_json_object(cleaned)
+            if extracted is not None:
+                try:
+                    return json.loads(extracted)
+                except json.JSONDecodeError:
+                    pass  # le bloc extrait n'était pas valide non plus -> on remonte l'erreur d'origine
+            raise MistralAPIError(
+                f"Réponse IA non parsable en JSON: {first_error}\nContenu: {content[:500]}"
+            )
 
 
 mistral_client = MistralClient()

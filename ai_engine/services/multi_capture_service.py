@@ -210,7 +210,13 @@ def analyze_multi_capture(
         )
         result = _normalize_ai_result(raw_result, language)
     except MistralAPIError as exc:
-        logger.error("Échec analyse IA multi-captures, fallback local activé: %s", exc)
+        # Log explicite AVANT le repli, avec le type d'exception d'origine — voir la note
+        # équivalente dans product_analysis_service.py::analyze_product_text().
+        logger.error(
+            "Échec de l'appel Mistral (analyse multi-captures) — repli local activé. Cause : [%s] %s",
+            type(exc).__name__,
+            exc,
+        )
         # deepcopy : voir la note équivalente dans product_analysis_service.py.
         result = copy.deepcopy(_fallback_result(language))
         result["product_name"] = aggregated_text[:120]

@@ -976,7 +976,14 @@ def analyze_product_text(raw_text: str, language: str = DEFAULT_LANGUAGE) -> dic
         result = _normalize_ai_result(raw_result, language)
 
     except MistralAPIError as exc:
-        logger.error("Échec analyse IA, fallback local activé: %s", exc)
+        # Log explicite AVANT le repli, avec le type d'exception d'origine (souvent la vraie
+        # piste de diagnostic : clé absente, timeout réseau, statut HTTP, JSON non parsable —
+        # voir MistralClient.chat_completion_json() pour le détail de chaque cas).
+        logger.error(
+            "Échec de l'appel Mistral (analyse texte) — repli local activé. Cause : [%s] %s",
+            type(exc).__name__,
+            exc,
+        )
         # deepcopy (pas dict()) : _fallback_result() contient des listes/dicts imbriqués —
         # un simple dict() superficiel laisserait `_apply_local_safety_net()` muter (ex:
         # result["warnings"].append(...)) un objet potentiellement partagé.

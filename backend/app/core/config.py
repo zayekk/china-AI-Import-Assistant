@@ -2,11 +2,26 @@
 Configuration centrale de l'application.
 Charge les variables d'environnement via pydantic-settings.
 """
+import logging
 import os
 from functools import lru_cache
+from pathlib import Path
 from typing import List
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
+
+# Chemin ABSOLU vers backend/.env, ancré sur l'emplacement de ce fichier plutôt que sur le
+# répertoire de travail du process. Un chemin relatif ("./.env") dépendrait du dossier depuis
+# lequel `uvicorn`/le process est lancé : lancé ailleurs qu'à l'intérieur de `backend/` (config
+# IDE, service, terminal différent), pydantic-settings ne trouve alors aucun .env et TOUTES les
+# valeurs retombent silencieusement sur leurs défauts vides (ex: MISTRAL_API_KEY="") — ce qui
+# déclenche le repli local sur chaque analyse, sans qu'aucune requête réseau n'ait jamais été
+# tentée. Sur Vercel, ce fichier n'existe pas (exclu du déploiement) : pydantic-settings lit
+# alors directement les variables d'environnement réelles (os.environ), qui restent prioritaires
+# sur env_file dans tous les cas — ce changement n'affecte donc pas la production Vercel.
+_ENV_FILE = Path(__file__).resolve().parent.parent.parent / ".env"
 
 
 class Settings(BaseSettings):
@@ -88,7 +103,7 @@ class Settings(BaseSettings):
     IMPORT_CNY_XOF_RATE: float = 100.0
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=True,
         extra="ignore",
@@ -108,6 +123,19 @@ def get_settings() -> Settings:
         origin = f"https://{vercel_url}"
         if origin not in s.CORS_ORIGINS:
             s.CORS_ORIGINS = [*s.CORS_ORIGINS, origin]
+
+    # Alerte FAIL-FAST au démarrage (pas seulement au moment d'une analyse) : sans clé, toute
+    # analyse IA basculera silencieusement sur le repli local (voir product_analysis_service.py)
+    # sans qu'aucun appel réseau n'ait jamais été tenté. Mieux vaut le voir dans les logs de
+    # démarrage que de le découvrir après coup via un résultat "Analyse IA indisponible".
+    if not s.MISTRAL_API_KEY:
+        logger.error(
+            "MISTRAL_API_KEY est vide — toutes les analyses IA basculeront sur le repli local "
+            "(product_name/scores à 0, warnings 'Analyse IA indisponible') sans jamais appeler "
+            "Mistral. Vérifiez que %s existe et contient MISTRAL_API_KEY, ou que la variable "
+            "d'environnement est bien injectée par votre plateforme de déploiement.",
+            _ENV_FILE,
+        )
 
     return s
 
