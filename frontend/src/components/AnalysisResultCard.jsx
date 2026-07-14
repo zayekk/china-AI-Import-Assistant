@@ -28,6 +28,17 @@ import CompetitionCard from "./CompetitionCard";
 import DataConfidenceCard from "./DataConfidenceCard";
 import MarketPositionCard from "./MarketPositionCard";
 import ImportCostCalculatorCard from "./ImportCostCalculatorCard";
+import ReviewsInsightCard from "./ReviewsInsightCard";
+import SupplierProfileCard from "./SupplierProfileCard";
+import TargetAudienceCard from "./TargetAudienceCard";
+import ImportStrategyCard from "./ImportStrategyCard";
+import SeasonalityCard from "./SeasonalityCard";
+import SaturationCard from "./SaturationCard";
+import ComplementaryProductsCard from "./ComplementaryProductsCard";
+import LogisticsCard from "./LogisticsCard";
+import ImportDifficultyCard from "./ImportDifficultyCard";
+import MarketingClaimsCard from "./MarketingClaimsCard";
+import ImporterSummaryCard from "./ImporterSummaryCard";
 
 // Bandes de confiance : bornes STRICTEMENT alignées sur `_confidence_level()` côté serveur
 // (backend/ai_engine/services/product_analysis_service.py) : 0-30 / 31-60 / 61-80 / 81-100.
@@ -112,6 +123,26 @@ export default function AnalysisResultCard({ result }) {
     market_positioning_explanation,
     resale_ease_rating,
     resale_ease_explanation,
+    reviews_available,
+    review_highlights = [],
+    review_complaints = [],
+    review_satisfaction,
+    review_recurring_defects = [],
+    supplier_profile,
+    target_audiences = [],
+    target_audience_explanation,
+    import_strategy,
+    seasonality,
+    saturation_level,
+    saturation_explanation,
+    complementary_products = [],
+    logistics_profile,
+    recommended_transport,
+    transport_explanation,
+    import_difficulty,
+    import_difficulty_explanation,
+    marketing_claims = [],
+    importer_summary = [],
   } = result;
 
   const confidenceBand = getConfidenceBand(confidence_score);
@@ -149,6 +180,8 @@ export default function AnalysisResultCard({ result }) {
           )}
         </div>
       )}
+
+      <SupplierProfileCard profile={supplier_profile} />
 
       <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 space-y-6">
       {mobile_summary && (
@@ -230,7 +263,18 @@ export default function AnalysisResultCard({ result }) {
         </div>
       )}
 
+      <TargetAudienceCard audiences={target_audiences} explanation={target_audience_explanation} />
+
       <ImportCostCalculatorCard estimate={commercial_estimate} />
+
+      <ImportStrategyCard
+        suggestedQuantity={import_strategy?.suggested_initial_quantity}
+        quantityReason={import_strategy?.quantity_reason}
+        salesTips={import_strategy?.sales_tips}
+        launchStrategy={import_strategy?.launch_strategy}
+      />
+
+      <ComplementaryProductsCard products={complementary_products} />
 
       {market_comparisons.length > 0 && (
         <div>
@@ -260,6 +304,45 @@ export default function AnalysisResultCard({ result }) {
           positioningExplanation={market_positioning_explanation}
         />
       )}
+
+      {(seasonality || saturation_level) && (
+        <div className="grid sm:grid-cols-2 gap-4">
+          {seasonality && (
+            <SeasonalityCard
+              isSeasonal={seasonality?.is_seasonal}
+              idealPeriod={seasonality?.ideal_period}
+              favorableMonths={seasonality?.favorable_months}
+              unfavorableMonths={seasonality?.unfavorable_months}
+            />
+          )}
+          {saturation_level && (
+            <SaturationCard level={saturation_level} explanation={saturation_explanation} />
+          )}
+        </div>
+      )}
+
+      {(logistics_profile || recommended_transport || import_difficulty) && (
+        <div className="grid sm:grid-cols-2 gap-4">
+          {(logistics_profile || recommended_transport) && (
+            <LogisticsCard
+              profile={logistics_profile}
+              recommendedTransport={recommended_transport}
+              transportExplanation={transport_explanation}
+            />
+          )}
+          {import_difficulty && (
+            <ImportDifficultyCard level={import_difficulty} explanation={import_difficulty_explanation} />
+          )}
+        </div>
+      )}
+
+      <ReviewsInsightCard
+        highlights={review_highlights}
+        complaints={review_complaints}
+        satisfaction={review_satisfaction}
+        recurringDefects={review_recurring_defects}
+        available={reviews_available}
+      />
 
       <div className="grid sm:grid-cols-2 gap-6">
         <div>
@@ -329,6 +412,8 @@ export default function AnalysisResultCard({ result }) {
       </div>
 
       <DataConfidenceCard confidence={data_confidence} />
+
+      <MarketingClaimsCard claims={marketing_claims} />
 
       {confidence_risks.length > 0 && (
         <div className="bg-orange-50 border border-orange-200 rounded-xl p-4">
@@ -415,6 +500,8 @@ export default function AnalysisResultCard({ result }) {
           </ul>
         </div>
       )}
+
+      <ImporterSummaryCard lines={importer_summary} />
 
       <p className="text-xs text-gray-400 border-t border-gray-100 pt-3">
         ⚠️ Cette analyse est générée par IA et ne garantit jamais un produit à 100%.

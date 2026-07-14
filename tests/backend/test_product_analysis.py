@@ -13,6 +13,8 @@ sys.path.append(str(Path(__file__).resolve().parents[2]))
 from ai_engine.services.mistral_client import MistralAPIError
 from ai_engine.services.product_analysis_service import (
     _clamp_winning_score,
+    _coerce_bool,
+    _coerce_str_list,
     _decision_badge,
     _import_decision,
     _margin_potential,
@@ -20,7 +22,12 @@ from ai_engine.services.product_analysis_service import (
     _normalize_competition_level,
     _normalize_data_confidence,
     _normalize_decision_reasons,
+    _normalize_enum,
     _normalize_market_positioning,
+    _normalize_marketing_claims,
+    _normalize_seasonality,
+    _normalize_submodel,
+    _normalize_target_audiences,
     _risk_level,
     _supplier_reliability,
     analyze_product_text,
@@ -483,3 +490,210 @@ def test_winning_product_score_not_capped_without_critical_alerts():
         result = analyze_product_text("Clean product with no risky keywords")
 
     assert result["winning_product_score"] == 9
+
+
+# ---------------------------------------------------------------------------
+# v1.3 : coercition de types (helpers génériques réutilisés par tous les nouveaux champs)
+# ---------------------------------------------------------------------------
+
+
+def test_coerce_bool_accepts_real_booleans():
+    assert _coerce_bool(True) is True
+    assert _coerce_bool(False) is False
+
+
+def test_coerce_bool_accepts_common_ai_string_variants():
+    assert _coerce_bool("true") is True
+    assert _coerce_bool("Yes") is True
+    assert _coerce_bool("oui") is True
+    assert _coerce_bool("1") is True
+    assert _coerce_bool("false") is False
+    assert _coerce_bool("non") is False
+    assert _coerce_bool(None) is False
+
+
+def test_coerce_str_list_truncates_to_max_items():
+    assert _coerce_str_list(["a", "b", "c", "d"], max_items=2) == ["a", "b"]
+
+
+def test_coerce_str_list_filters_empty_strings_and_non_list():
+    assert _coerce_str_list(["a", "", "  ", "b"]) == ["a", "b"]
+    assert _coerce_str_list("not a list") == []
+    assert _coerce_str_list(None) == []
+
+
+# ---------------------------------------------------------------------------
+# v1.3 : _normalize_enum() — refactor générique remplaçant 3 fonctions dupliquées
+# (_normalize_demand_level / _normalize_competition_level / _normalize_market_positioning
+# délèguent désormais toutes à ce helper).
+# ---------------------------------------------------------------------------
+
+
+def test_normalize_enum_valid_value_is_lowercased():
+    assert _normalize_enum("HIGH", ("low", "high"), "low") == "high"
+
+
+def test_normalize_enum_invalid_value_falls_back_to_default():
+    assert _normalize_enum("astronomical", ("low", "high"), "low") == "low"
+
+
+def test_normalize_enum_missing_value_falls_back_to_default():
+    assert _normalize_enum(None, ("low", "high"), "low") == "low"
+
+
+# ---------------------------------------------------------------------------
+# v1.3 : _normalize_submodel() — sous-objets IA à champs plats (SupplierProfile sans
+# overall_trust, ImportStrategy, LogisticsProfile).
+# ---------------------------------------------------------------------------
+
+
+def test_normalize_submodel_missing_key_returns_safe_defaults():
+    spec = {"reputation": "str", "dispute_history": "str_or_none", "fragile": "bool"}
+    result = _normalize_submodel({}, "supplier_profile", spec)
+    assert result == {"reputation": "", "dispute_history": None, "fragile": False}
+
+
+def test_normalize_submodel_ignores_extra_ai_keys():
+    spec = {"reputation": "str"}
+    raw = {"supplier_profile": {"reputation": "Bonne", "overall_trust": "high"}}
+    result = _normalize_submodel(raw, "supplier_profile", spec)
+    # "overall_trust" n'est pas dans la spec -> ignoré ici (toujours recalculé côté serveur
+    # séparément dans _normalize_ai_result, jamais lu depuis la réponse IA brute).
+    assert result == {"reputation": "Bonne"}
+
+
+# ---------------------------------------------------------------------------
+# v1.3 : _normalize_seasonality() — garde-fou anti-hallucination (pas de mois sans saisonnalité)
+# ---------------------------------------------------------------------------
+
+
+def test_seasonality_not_seasonal_clears_months_even_if_ai_provided_them():
+    """Garde-fou serveur : si is_seasonal=false, on ne fait pas confiance à l'IA seule pour
+    avoir laissé les listes de mois vides (même esprit que le nettoyage des avis)."""
+    raw = {
+        "seasonality": {
+            "is_seasonal": False,
+            "favorable_months": ["Décembre"],
+            "unfavorable_months": ["Juillet"],
+        }
+    }
+    result = _normalize_seasonality(raw)
+    assert result["favorable_months"] == []
+    assert result["unfavorable_months"] == []
+
+
+def test_seasonality_seasonal_keeps_months():
+    raw = {
+        "seasonality": {
+            "is_seasonal": True,
+            "ideal_period": "Novembre-Décembre",
+            "favorable_months": ["Novembre", "Décembre"],
+            "unfavorable_months": ["Juillet"],
+        }
+    }
+    result = _normalize_seasonality(raw)
+    assert result["ideal_period"] == "Novembre-Décembre"
+    assert result["favorable_months"] == ["Novembre", "Décembre"]
+
+
+# ---------------------------------------------------------------------------
+# v1.3 : _normalize_target_audiences() — liste fermée, dédoublonnée, ordre préservé
+# ---------------------------------------------------------------------------
+
+
+def test_target_audiences_filters_invalid_values():
+    raw = {"target_audiences": ["students", "aliens", "gamers"]}
+    assert _normalize_target_audiences(raw) == ["students", "gamers"]
+
+
+def test_target_audiences_deduplicates_preserving_order():
+    raw = {"target_audiences": ["gamers", "students", "gamers"]}
+    assert _normalize_target_audiences(raw) == ["gamers", "students"]
+
+
+def test_target_audiences_missing_key_is_empty_list():
+    assert _normalize_target_audiences({}) == []
+
+
+# ---------------------------------------------------------------------------
+# v1.3 : _normalize_marketing_claims() — ne signale que des termes réellement présents
+# ---------------------------------------------------------------------------
+
+
+def test_marketing_claims_ignores_items_without_claim_text():
+    raw = {"marketing_claims": [{"claim": "", "justified": True}, {"justified": False}]}
+    assert _normalize_marketing_claims(raw) == []
+
+
+def test_marketing_claims_keeps_well_formed_items():
+    raw = {
+        "marketing_claims": [
+            {"claim": "Premium", "justified": False, "explanation": "Aucune preuve dans le texte."}
+        ]
+    }
+    result = _normalize_marketing_claims(raw)
+    assert result == [
+        {"claim": "Premium", "justified": False, "explanation": "Aucune preuve dans le texte."}
+    ]
+
+
+def test_marketing_claims_ignores_non_dict_items():
+    assert _normalize_marketing_claims({"marketing_claims": ["Premium", 42]}) == []
+
+
+# ---------------------------------------------------------------------------
+# v1.3 : supplier_profile.overall_trust — TOUJOURS recalculé côté serveur à partir de
+# supplier_reliability (yes/medium/no), jamais lu depuis la réponse IA brute.
+# ---------------------------------------------------------------------------
+
+
+def test_overall_trust_high_when_supplier_score_high():
+    with patch("ai_engine.services.product_analysis_service.mistral_client") as mock_mistral:
+        mock_mistral.chat_completion_json.return_value = _raw_ai_result(
+            supplier_score=90, supplier_profile={"overall_trust": "low"}
+        )
+        result = analyze_product_text("Clean product with no risky keywords")
+
+    # supplier_score=90 -> _supplier_reliability="yes" -> overall_trust="high", quel que soit
+    # ce que l'IA a renvoyé ("low" ci-dessus est ignoré).
+    assert result["supplier_profile"]["overall_trust"] == "high"
+
+
+def test_overall_trust_low_when_supplier_score_low():
+    with patch("ai_engine.services.product_analysis_service.mistral_client") as mock_mistral:
+        mock_mistral.chat_completion_json.return_value = _raw_ai_result(supplier_score=10)
+        result = analyze_product_text("Clean product with no risky keywords")
+
+    assert result["supplier_profile"]["overall_trust"] == "low"
+
+
+# ---------------------------------------------------------------------------
+# v1.3 : reviews_available=False force le nettoyage serveur des listes d'avis (même garde-fou
+# que la saisonnalité — ne fait pas confiance à l'IA seule pour respecter la consigne).
+# ---------------------------------------------------------------------------
+
+
+def test_reviews_not_available_clears_review_lists_even_if_ai_provided_them():
+    with patch("ai_engine.services.product_analysis_service.mistral_client") as mock_mistral:
+        mock_mistral.chat_completion_json.return_value = _raw_ai_result(
+            reviews_available=False,
+            review_highlights=["Bonne qualité"],
+            review_complaints=["Livraison lente"],
+            review_recurring_defects=["Casse fréquente"],
+        )
+        result = analyze_product_text("Clean product with no risky keywords")
+
+    assert result["review_highlights"] == []
+    assert result["review_complaints"] == []
+    assert result["review_recurring_defects"] == []
+
+
+def test_reviews_available_keeps_lists():
+    with patch("ai_engine.services.product_analysis_service.mistral_client") as mock_mistral:
+        mock_mistral.chat_completion_json.return_value = _raw_ai_result(
+            reviews_available=True,
+            review_highlights=["Bonne qualité"],
+        )
+        result = analyze_product_text("Clean product with no risky keywords")
+
+    assert result["review_highlights"] == ["Bonne qualité"]

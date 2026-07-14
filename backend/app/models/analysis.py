@@ -104,6 +104,32 @@ class Analysis(Base):
     resale_ease_rating = Column(Integer, nullable=True)
     resale_ease_explanation = Column(Text, nullable=True)
 
+    # v1.3 : avis clients, profil vendeur, public cible, stratégie d'import, saisonnalité,
+    # saturation, produits complémentaires, logistique, difficulté d'import, marketing
+    # trompeur, résumé importateur — voir schémas AIAnalysisResult / SupplierProfile /
+    # ImportStrategy / Seasonality / LogisticsProfile / MarketingClaim et
+    # ai_engine/services/product_analysis_service.py.
+    reviews_available = Column(Boolean, nullable=True)
+    review_highlights = Column(JSON, nullable=True)          # liste de strings (4 max)
+    review_complaints = Column(JSON, nullable=True)          # liste de strings (4 max)
+    review_recurring_defects = Column(JSON, nullable=True)   # liste de strings (4 max)
+    review_satisfaction = Column(String(12), nullable=True)
+    supplier_profile = Column(JSON, nullable=True)           # dict SupplierProfile
+    target_audiences = Column(JSON, nullable=True)           # liste de strings (liste fermée)
+    target_audience_explanation = Column(Text, nullable=True)
+    import_strategy = Column(JSON, nullable=True)            # dict ImportStrategy
+    seasonality = Column(JSON, nullable=True)                # dict Seasonality
+    saturation_level = Column(String(24), nullable=True)
+    saturation_explanation = Column(Text, nullable=True)
+    complementary_products = Column(JSON, nullable=True)     # liste de strings (6 max)
+    logistics_profile = Column(JSON, nullable=True)          # dict LogisticsProfile
+    recommended_transport = Column(String(10), nullable=True)
+    transport_explanation = Column(Text, nullable=True)
+    import_difficulty = Column(String(12), nullable=True)
+    import_difficulty_explanation = Column(Text, nullable=True)
+    marketing_claims = Column(JSON, nullable=True)           # liste de dicts MarketingClaim
+    importer_summary = Column(JSON, nullable=True)           # liste de strings (8 max)
+
     raw_ai_response = Column(JSON, nullable=True)  # réponse brute pour debug / audit
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())

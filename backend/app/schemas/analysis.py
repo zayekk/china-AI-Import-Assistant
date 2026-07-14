@@ -114,6 +114,68 @@ class MarketComparison(BaseModel):
     comparison: str
 
 
+class SupplierProfile(BaseModel):
+    """
+    Profil du vendeur (v1.3). Tous les champs sont fournis par l'IA à partir du texte source
+    SAUF "overall_trust", TOUJOURS recalculé côté serveur à partir de "supplier_reliability"
+    (mapping yes->high / medium->medium / no->low) pour garantir la cohérence avec le badge
+    fournisseur — voir ai_engine/services/product_analysis_service.py::_normalize_ai_result().
+    """
+
+    estimated_age: str | None = None
+    sales_volume: str | None = None
+    reputation: str = ""
+    service_quality: str = ""
+    shipping_speed: str = ""
+    return_policy: str = ""
+    dispute_history: str | None = None
+    overall_trust: Literal["low", "medium", "high"] = "medium"
+
+
+class ImportStrategy(BaseModel):
+    """Stratégie commerciale d'import (v1.3), entièrement générée par l'IA. Ne répète PAS le
+    niveau de risque ni le potentiel commercial (déjà couverts par risk_level /
+    commercial_potential_rating)."""
+
+    suggested_initial_quantity: str = ""
+    quantity_reason: str = ""
+    sales_tips: str = ""
+    launch_strategy: str = ""
+
+
+class Seasonality(BaseModel):
+    """Analyse saisonnière (v1.3), générée par l'IA. Si is_seasonal est false, les listes de
+    mois restent vides (aucune saisonnalité hallucinée)."""
+
+    is_seasonal: bool = False
+    ideal_period: str | None = None
+    favorable_months: list[str] = Field(default_factory=list)
+    unfavorable_months: list[str] = Field(default_factory=list)
+
+
+class LogisticsProfile(BaseModel):
+    """Profil logistique (v1.3), déduit par l'IA du texte/de la catégorie produit, servant de
+    base à recommended_transport et à import_difficulty (cohérence croisée)."""
+
+    fragile: bool = False
+    heavy: bool = False
+    bulky: bool = False
+    liquid: bool = False
+    has_battery: bool = False
+    textile: bool = False
+    electronic: bool = False
+
+
+class MarketingClaim(BaseModel):
+    """Terme marketing potentiellement trompeur RÉELLEMENT présent dans le texte source (v1.3) :
+    Premium, Luxury, Military, Professional, Original, 100%, Lifetime... L'IA juge s'il est
+    justifié par des preuves concrètes ou s'il s'agit de survente sans preuve. Jamais inventé."""
+
+    claim: str
+    justified: bool
+    explanation: str
+
+
 class AIAnalysisResult(BaseModel):
     """Contrat de sortie STRICT renvoyé par le moteur IA (Mistral)."""
 
@@ -204,6 +266,58 @@ class AIAnalysisResult(BaseModel):
     resale_ease_rating: int = Field(default=3, ge=1, le=5)
     resale_ease_explanation: str = ""
 
+    # --- v1.3 : avis clients, profil vendeur, public cible, stratégie d'import, saisonnalité,
+    # saturation, produits complémentaires, logistique, difficulté d'import, marketing trompeur,
+    # résumé importateur ---
+
+    # 1. Avis clients ("Ce que disent réellement les clients"). Synthèse par l'IA, jamais un
+    # avis recopié mot pour mot. Si reviews_available est false, les autres champs restent
+    # vides/neutres (aucun avis inventé).
+    reviews_available: bool = False
+    review_highlights: list[str] = Field(default_factory=list)          # points appréciés (max 4)
+    review_complaints: list[str] = Field(default_factory=list)          # reproches (max 4)
+    review_recurring_defects: list[str] = Field(default_factory=list)   # défauts récurrents (max 4)
+    review_satisfaction: Literal["very_high", "high", "medium", "low", "very_low"] = "medium"
+
+    # 2. Profil du vendeur (overall_trust recalculé côté serveur).
+    supplier_profile: SupplierProfile = Field(default_factory=SupplierProfile)
+
+    # 3. Public cible (sous-ensemble filtré côté serveur d'une liste fermée).
+    target_audiences: list[str] = Field(default_factory=list)
+    target_audience_explanation: str = ""
+
+    # 4. Stratégie commerciale d'import.
+    import_strategy: ImportStrategy = Field(default_factory=ImportStrategy)
+
+    # 5. Analyse saisonnière.
+    seasonality: Seasonality = Field(default_factory=Seasonality)
+
+    # 6. Niveau de saturation du marché (distinct de competition_level : offre vs demande, pas
+    # nombre de concurrents).
+    saturation_level: Literal["low", "competitive", "saturated", "extremely_saturated"] = (
+        "competitive"
+    )
+    saturation_explanation: str = ""
+
+    # 7. Produits complémentaires (recommandation commerciale, pas une détection — max 6).
+    complementary_products: list[str] = Field(default_factory=list)
+
+    # 8. Analyse logistique.
+    logistics_profile: LogisticsProfile = Field(default_factory=LogisticsProfile)
+    recommended_transport: Literal["air", "sea", "mixed"] = "air"
+    transport_explanation: str = ""
+
+    # 9. Difficulté d'importation (cohérente avec logistics_profile et les risques identifiés).
+    import_difficulty: Literal["very_easy", "easy", "medium", "hard"] = "medium"
+    import_difficulty_explanation: str = ""
+
+    # 10. Détection de termes marketing trompeurs réellement présents dans le texte source.
+    marketing_claims: list[MarketingClaim] = Field(default_factory=list)
+
+    # 11. Résumé structuré final pour l'importateur (max 8 lignes courtes, distinct de
+    # quick_report/ai_recommendation_summary).
+    importer_summary: list[str] = Field(default_factory=list)
+
 
 class AnalysisOut(BaseModel):
     id: uuid.UUID
@@ -257,6 +371,27 @@ class AnalysisOut(BaseModel):
     market_positioning_explanation: str | None = None
     resale_ease_rating: int | None = None
     resale_ease_explanation: str | None = None
+
+    reviews_available: bool | None = None
+    review_highlights: list[str] | None = None
+    review_complaints: list[str] | None = None
+    review_recurring_defects: list[str] | None = None
+    review_satisfaction: str | None = None
+    supplier_profile: dict | None = None
+    target_audiences: list[str] | None = None
+    target_audience_explanation: str | None = None
+    import_strategy: dict | None = None
+    seasonality: dict | None = None
+    saturation_level: str | None = None
+    saturation_explanation: str | None = None
+    complementary_products: list[str] | None = None
+    logistics_profile: dict | None = None
+    recommended_transport: str | None = None
+    transport_explanation: str | None = None
+    import_difficulty: str | None = None
+    import_difficulty_explanation: str | None = None
+    marketing_claims: list[dict] | None = None
+    importer_summary: list[str] | None = None
 
     model_config = {"from_attributes": True}
 

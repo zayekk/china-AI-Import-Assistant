@@ -102,6 +102,18 @@ Analyser un texte produit (titre, description, variantes) afin de :
     "RÈGLE SUR LE POSITIONNEMENT MARCHÉ" ci-dessous.
 24. Évaluer la facilité de revente sur 5 et l'expliquer : voir "RÈGLE SUR LA FACILITÉ DE REVENTE"
     ci-dessous.
+25. Synthétiser ce que disent RÉELLEMENT les clients (avis) : voir "RÈGLE SUR LES AVIS CLIENTS".
+26. Dresser le profil du vendeur : voir "RÈGLE SUR LE PROFIL VENDEUR".
+27. Identifier le public cible : voir "RÈGLE SUR LE PUBLIC CIBLE".
+28. Proposer une stratégie commerciale d'import : voir "RÈGLE SUR LA STRATÉGIE D'IMPORT".
+29. Analyser la saisonnalité du produit : voir "RÈGLE SUR LA SAISONNALITÉ".
+30. Évaluer le niveau de saturation du marché : voir "RÈGLE SUR LA SATURATION".
+31. Suggérer des produits complémentaires : voir "RÈGLE SUR LES PRODUITS COMPLÉMENTAIRES".
+32. Établir le profil logistique et le transport recommandé : voir "RÈGLE SUR LA LOGISTIQUE".
+33. Évaluer la difficulté d'importation : voir "RÈGLE SUR LA DIFFICULTÉ D'IMPORT".
+34. Détecter les termes marketing potentiellement trompeurs : voir "RÈGLE SUR LE MARKETING
+    TROMPEUR".
+35. Rédiger un résumé importateur final : voir "RÈGLE SUR LE RÉSUMÉ IMPORTATEUR".
 
 RÈGLE ANTI-RÉPÉTITION (qualité rédactionnelle) :
 - Ne répète JAMAIS la même information ou la même phrase dans plusieurs champs (ex :
@@ -295,6 +307,91 @@ RÈGLE SUR LE SCORE DE CONFIANCE :
 - Ne renvoie JAMAIS de champ "confidence_level" : ce niveau est calculé uniquement côté serveur
   à partir de "confidence_score".
 
+RÈGLE SUR LES AVIS CLIENTS :
+- "reviews_available" (booléen) : true UNIQUEMENT si des avis clients sont réellement présents
+  dans le texte source, false sinon. Si false, TOUS les autres champs de ce groupe doivent
+  rester vides ("review_highlights", "review_complaints", "review_recurring_defects" : listes
+  vides) ou neutres ("review_satisfaction": "medium") — n'invente JAMAIS d'avis.
+- "review_highlights" (liste, 4 maximum) : points réellement appréciés par les clients. Fais une
+  VRAIE synthèse, ne recopie JAMAIS un avis mot pour mot.
+- "review_complaints" (liste, 4 maximum) : reproches/critiques récurrents des clients.
+- "review_recurring_defects" (liste, 4 maximum) : défauts matériels/qualité qui reviennent.
+- "review_satisfaction" doit valoir exactement l'une de : "very_high", "high", "medium", "low",
+  "very_low".
+
+RÈGLE SUR LE PROFIL VENDEUR :
+- "supplier_profile" est un objet décrivant le vendeur à partir du texte source :
+  "estimated_age" (ancienneté estimée de la boutique, string ou null), "sales_volume" (volume de
+  ventes constaté, string ou null), "reputation" (réputation/note globale, string), "service_quality"
+  (qualité du service client, string), "shipping_speed" (rapidité d'expédition, string),
+  "return_policy" (politique de retour, string), "dispute_history" (historique de litiges connu,
+  string ou null). Laisse la string vide ("") ou null si l'information est absente — n'invente rien.
+- NE renvoie JAMAIS le champ "overall_trust" : il est calculé UNIQUEMENT côté serveur à partir
+  de la fiabilité fournisseur déjà déterminée.
+
+RÈGLE SUR LE PUBLIC CIBLE :
+- "target_audiences" (liste) : sous-ensemble STRICT de ces valeurs autorisées : "students",
+  "children", "professionals", "gamers", "women", "men", "gifts", "luxury", "daily_use", "other".
+  N'utilise AUCUNE autre valeur (toute valeur hors liste sera ignorée). Liste vide si indéterminable.
+- "target_audience_explanation" : 1 à 2 phrases justifiant le(s) public(s) retenu(s).
+
+RÈGLE SUR LA STRATÉGIE D'IMPORT :
+- "import_strategy" est un objet : "suggested_initial_quantity" (quantité de premier
+  approvisionnement conseillée, string), "quantity_reason" (pourquoi cette quantité, string),
+  "sales_tips" (conseils de vente concrets, string), "launch_strategy" (stratégie de lancement,
+  string). NE répète PAS ici le niveau de risque ni le potentiel commercial (déjà couverts par
+  "risk_level" et "commercial_potential_rating") — apporte une valeur nouvelle et actionnable.
+
+RÈGLE SUR LA SAISONNALITÉ :
+- "seasonality" est un objet : "is_seasonal" (booléen), "ideal_period" (meilleure période de
+  vente, string ou null), "favorable_months" (liste de mois favorables), "unfavorable_months"
+  (liste de mois défavorables). Si "is_seasonal" est false, les deux listes de mois DOIVENT
+  rester vides — n'hallucine JAMAIS une saisonnalité qui n'existe pas.
+
+RÈGLE SUR LA SATURATION :
+- "saturation_level" doit valoir exactement l'une de : "low", "competitive", "saturated",
+  "extremely_saturated". C'est DIFFÉRENT de "competition_level" : la concurrence mesure le nombre
+  et la force des vendeurs concurrents, tandis que la saturation mesure l'offre du marché par
+  rapport à la demande. Un marché peut avoir peu de concurrents mais être déjà saturé par du
+  dropshipping massif, ou l'inverse.
+- "saturation_explanation" : 1 à 2 phrases justifiant ce niveau.
+
+RÈGLE SUR LES PRODUITS COMPLÉMENTAIRES :
+- "complementary_products" (liste, 6 maximum) : accessoires/produits pertinents à vendre AVEC ce
+  type de produit. C'est une RECOMMANDATION commerciale (pas une détection) : ils n'ont pas besoin
+  d'être mentionnés dans le texte source, mais doivent être réellement cohérents avec le produit.
+
+RÈGLE SUR LA LOGISTIQUE :
+- "logistics_profile" est un objet de 7 booléens décrivant le produit pour l'expédition :
+  "fragile", "heavy", "bulky", "liquid", "has_battery", "textile", "electronic". Déduis-les du
+  texte et de la catégorie du produit.
+- "recommended_transport" doit valoir exactement l'une de : "air", "sea", "mixed".
+- "transport_explanation" : 1 à 2 phrases justifiant le mode de transport recommandé.
+
+RÈGLE SUR LA DIFFICULTÉ D'IMPORT :
+- "import_difficulty" doit valoir exactement l'une de : "very_easy", "easy", "medium", "hard".
+  Tiens compte de la douane, du "logistics_profile" (fragilité, volume, batterie...) et des
+  risques déjà identifiés dans CETTE MÊME réponse — reste COHÉRENT, ne contredis jamais
+  "logistics_profile" (ex: un produit fragile + avec batterie ne peut pas être "very_easy").
+- "import_difficulty_explanation" : 1 à 2 phrases justifiant ce niveau.
+
+RÈGLE SUR LE MARKETING TROMPEUR :
+- "marketing_claims" (liste d'objets {{"claim", "justified", "explanation"}}) : surveille les
+  termes de survente suivants et leurs équivalents chinois/français : Premium, Luxury, Military,
+  Professional, Original, Authentic, "100%", Unlimited, Lifetime, Best, Ultra, Only. Pour chaque
+  terme RÉELLEMENT présent dans le texte source, indique "claim" (le terme tel qu'écrit),
+  "justified" (booléen : true si des preuves concrètes du texte le justifient — prix cohérent,
+  spécifications précises, marque reconnue... — false s'il s'agit de survente sans preuve) et
+  "explanation" (1 phrase). RÈGLE ABSOLUE : ne signale QUE les termes réellement présents dans
+  le texte ; liste vide si aucun trouvé ; n'invente JAMAIS un terme absent.
+
+RÈGLE SUR LE RÉSUMÉ IMPORTATEUR :
+- "importer_summary" (liste de 8 lignes courtes MAXIMUM, sans emoji obligatoire) : résumé
+  structuré final couvrant, dans l'ordre si possible : à qui le produit convient, principal
+  avantage, principal risque, conseil final, recommandation d'importation globale. C'est
+  DIFFÉRENT de "quick_report" (lecture 5 secondes avec emojis) et de "ai_recommendation_summary" :
+  ne recopie NI l'un NI l'autre mot pour mot, reformule en synthèse finale.
+
 FORMAT DE SORTIE :
 Tu dois répondre UNIQUEMENT avec un objet JSON valide, sans texte avant ni après, \
 sans balises markdown, respectant EXACTEMENT ce schéma :
@@ -355,7 +452,55 @@ sans balises markdown, respectant EXACTEMENT ce schéma :
   "market_positioning": "unknown",
   "market_positioning_explanation": "string",
   "resale_ease_rating": 3,
-  "resale_ease_explanation": "string"
+  "resale_ease_explanation": "string",
+  "reviews_available": false,
+  "review_highlights": ["string", "..."],
+  "review_complaints": ["string", "..."],
+  "review_recurring_defects": ["string", "..."],
+  "review_satisfaction": "medium",
+  "supplier_profile": {{
+    "estimated_age": "string ou null",
+    "sales_volume": "string ou null",
+    "reputation": "string",
+    "service_quality": "string",
+    "shipping_speed": "string",
+    "return_policy": "string",
+    "dispute_history": "string ou null"
+  }},
+  "target_audiences": ["daily_use", "..."],
+  "target_audience_explanation": "string",
+  "import_strategy": {{
+    "suggested_initial_quantity": "string",
+    "quantity_reason": "string",
+    "sales_tips": "string",
+    "launch_strategy": "string"
+  }},
+  "seasonality": {{
+    "is_seasonal": false,
+    "ideal_period": "string ou null",
+    "favorable_months": ["string", "..."],
+    "unfavorable_months": ["string", "..."]
+  }},
+  "saturation_level": "competitive",
+  "saturation_explanation": "string",
+  "complementary_products": ["string", "..."],
+  "logistics_profile": {{
+    "fragile": false,
+    "heavy": false,
+    "bulky": false,
+    "liquid": false,
+    "has_battery": false,
+    "textile": false,
+    "electronic": false
+  }},
+  "recommended_transport": "air",
+  "transport_explanation": "string",
+  "import_difficulty": "medium",
+  "import_difficulty_explanation": "string",
+  "marketing_claims": [
+    {{"claim": "string", "justified": false, "explanation": "string"}}
+  ],
+  "importer_summary": ["string", "..."]
 }}
 
 "recommendation" doit valoir exactement "BUY", "AVOID" ou "CAUTION".
@@ -371,6 +516,20 @@ pas d'objets imbriqués). "missing_information", "confidence_reasons", "confiden
 "critical_alerts", "quick_report" et "decision_reasons" (5 éléments MAXIMUM) sont des listes de
 strings. "market_comparisons" est une liste d'objets à 3 clés strings (liste vide si aucun
 composant comparable détecté).
+"review_satisfaction" doit valoir exactement "very_high", "high", "medium", "low" ou "very_low".
+"saturation_level" doit valoir exactement "low", "competitive", "saturated" ou
+"extremely_saturated".
+"recommended_transport" doit valoir exactement "air", "sea" ou "mixed".
+"import_difficulty" doit valoir exactement "very_easy", "easy", "medium" ou "hard".
+"target_audiences" est une liste dont chaque valeur est UNIQUEMENT l'une de : "students",
+"children", "professionals", "gamers", "women", "men", "gifts", "luxury", "daily_use", "other".
+"supplier_profile", "import_strategy", "seasonality" et "logistics_profile" sont des objets aux
+clés exactes indiquées ci-dessus. NE renvoie JAMAIS "overall_trust" dans "supplier_profile" :
+il est calculé côté serveur. "review_highlights", "review_complaints" et
+"review_recurring_defects" contiennent 4 éléments MAXIMUM chacune, "complementary_products" 6
+MAXIMUM, "importer_summary" 8 MAXIMUM. "marketing_claims" est une liste d'objets à 3 clés
+("claim" string, "justified" booléen, "explanation" string ; liste vide si aucun terme de
+survente réellement présent).
 """
 
 SYSTEM_PROMPT_SUPPLIER_ANALYSIS = """Tu es un analyste spécialisé dans l'évaluation de la fiabilité \

@@ -27,6 +27,22 @@ _VALID_COMPETITION_LEVELS = ("low", "medium", "high", "very_high")
 _VALID_MARKET_POSITIONING = ("premium", "mid_range", "entry_level", "saturated", "unknown")
 _VALID_LANGUAGES = ("fr", "en")
 _MAX_DECISION_REASONS = 5
+
+# --- v1.3 : listes fermées de valeurs enum acceptées ---
+_VALID_REVIEW_SATISFACTION = ("very_high", "high", "medium", "low", "very_low")
+_VALID_TARGET_AUDIENCES = (
+    "students", "children", "professionals", "gamers", "women", "men",
+    "gifts", "luxury", "daily_use", "other",
+)
+_VALID_SATURATION_LEVELS = ("low", "competitive", "saturated", "extremely_saturated")
+_VALID_TRANSPORT = ("air", "sea", "mixed")
+_VALID_IMPORT_DIFFICULTY = ("very_easy", "easy", "medium", "hard")
+# supplier_profile.overall_trust est TOUJOURS recalculé côté serveur à partir de
+# _supplier_reliability() (yes/medium/no), jamais lu depuis la réponse IA brute.
+_OVERALL_TRUST_MAP = {"yes": "high", "medium": "medium", "no": "low"}
+_MAX_REVIEW_ITEMS = 4
+_MAX_COMPLEMENTARY_PRODUCTS = 6
+_MAX_IMPORTER_SUMMARY = 8
 # Si une contradiction factuelle avérée existe, le potentiel "produit gagnant" ne peut pas être
 # élevé, quels que soient les autres facteurs (règle également imposée à l'IA dans le prompt,
 # mais jamais fait confiance à elle seule — voir RÈGLE ABSOLUE ailleurs dans ce module).
@@ -83,6 +99,19 @@ _STRINGS = {
         "fallback_resale_ease_explanation": (
             "Analyse IA indisponible : facilité de revente non évaluable pour le moment."
         ),
+        "fallback_target_audience_explanation": (
+            "Analyse IA indisponible : public cible non évaluable pour le moment."
+        ),
+        "fallback_saturation_explanation": (
+            "Analyse IA indisponible : niveau de saturation non évaluable pour le moment."
+        ),
+        "fallback_transport_explanation": (
+            "Analyse IA indisponible : mode de transport recommandé non évaluable pour le moment."
+        ),
+        "fallback_import_difficulty_explanation": (
+            "Analyse IA indisponible : difficulté d'importation non évaluable pour le moment."
+        ),
+        "fallback_importer_summary": ["⚠ Analyse IA indisponible pour le moment."],
     },
     "en": {
         "fallback_warning": (
@@ -131,6 +160,19 @@ _STRINGS = {
         "fallback_resale_ease_explanation": (
             "AI analysis unavailable: resale ease cannot be evaluated right now."
         ),
+        "fallback_target_audience_explanation": (
+            "AI analysis unavailable: target audience cannot be evaluated right now."
+        ),
+        "fallback_saturation_explanation": (
+            "AI analysis unavailable: saturation level cannot be evaluated right now."
+        ),
+        "fallback_transport_explanation": (
+            "AI analysis unavailable: recommended transport cannot be evaluated right now."
+        ),
+        "fallback_import_difficulty_explanation": (
+            "AI analysis unavailable: import difficulty cannot be evaluated right now."
+        ),
+        "fallback_importer_summary": ["⚠ AI analysis temporarily unavailable."],
     },
 }
 
@@ -203,6 +245,55 @@ def _fallback_result(language: str) -> dict:
         "market_positioning_explanation": s["fallback_market_positioning_explanation"],
         "resale_ease_rating": 1,
         "resale_ease_explanation": s["fallback_resale_ease_explanation"],
+        # --- v1.3 : valeurs neutres localisées (aucune donnée exploitable sans IA) ---
+        "reviews_available": False,
+        "review_highlights": [],
+        "review_complaints": [],
+        "review_recurring_defects": [],
+        "review_satisfaction": "medium",
+        # overall_trust "low" cohérent avec supplier_reliability "no" ci-dessus.
+        "supplier_profile": {
+            "estimated_age": None,
+            "sales_volume": None,
+            "reputation": "",
+            "service_quality": "",
+            "shipping_speed": "",
+            "return_policy": "",
+            "dispute_history": None,
+            "overall_trust": "low",
+        },
+        "target_audiences": [],
+        "target_audience_explanation": s["fallback_target_audience_explanation"],
+        "import_strategy": {
+            "suggested_initial_quantity": "",
+            "quantity_reason": "",
+            "sales_tips": "",
+            "launch_strategy": "",
+        },
+        "seasonality": {
+            "is_seasonal": False,
+            "ideal_period": None,
+            "favorable_months": [],
+            "unfavorable_months": [],
+        },
+        "saturation_level": "competitive",
+        "saturation_explanation": s["fallback_saturation_explanation"],
+        "complementary_products": [],
+        "logistics_profile": {
+            "fragile": False,
+            "heavy": False,
+            "bulky": False,
+            "liquid": False,
+            "has_battery": False,
+            "textile": False,
+            "electronic": False,
+        },
+        "recommended_transport": "air",
+        "transport_explanation": s["fallback_transport_explanation"],
+        "import_difficulty": "medium",
+        "import_difficulty_explanation": s["fallback_import_difficulty_explanation"],
+        "marketing_claims": [],
+        "importer_summary": list(s["fallback_importer_summary"]),
         # decision_badge/risk_level/import_decision : simples valeurs par défaut, toujours
         # recalculées par `_apply_local_safety_net()` (appelée juste après dans tous les cas).
         "decision_badge": "caution",
@@ -334,19 +425,27 @@ def _clamp_rating(value) -> int:
     return max(1, min(5, v))
 
 
-def _normalize_demand_level(raw_value) -> str:
+def _normalize_enum(raw_value, valid_values: tuple[str, ...], default: str) -> str:
+    """Normalise une valeur enum : la retourne si elle appartient à `valid_values`
+    (après strip/lower), sinon retombe sur `default`. Helper unique partagé par tous les
+    champs enum (demande, concurrence, positionnement, satisfaction, saturation, transport,
+    difficulté d'import...)."""
     value = str(raw_value or "").strip().lower()
-    return value if value in _VALID_DEMAND_LEVELS else "medium"
+    return value if value in valid_values else default
+
+
+# Wrappers nommés conservés pour compatibilité (importés tels quels par les tests et par
+# multi_capture_service) — ils délèguent désormais au helper générique _normalize_enum().
+def _normalize_demand_level(raw_value) -> str:
+    return _normalize_enum(raw_value, _VALID_DEMAND_LEVELS, "medium")
 
 
 def _normalize_competition_level(raw_value) -> str:
-    value = str(raw_value or "").strip().lower()
-    return value if value in _VALID_COMPETITION_LEVELS else "medium"
+    return _normalize_enum(raw_value, _VALID_COMPETITION_LEVELS, "medium")
 
 
 def _normalize_market_positioning(raw_value) -> str:
-    value = str(raw_value or "").strip().lower()
-    return value if value in _VALID_MARKET_POSITIONING else "unknown"
+    return _normalize_enum(raw_value, _VALID_MARKET_POSITIONING, "unknown")
 
 
 def _normalize_decision_reasons(raw: dict) -> list[str]:
@@ -399,6 +498,137 @@ def _normalize_market_comparisons(raw: dict) -> list[dict]:
             result.append(
                 {"component": component, "detected_value": detected_value, "comparison": comparison}
             )
+    return result
+
+
+# ---------------------------------------------------------------------------
+# v1.3 : coercition de types + normalisation des sous-objets IA
+# ---------------------------------------------------------------------------
+
+def _coerce_str(value) -> str:
+    return str(value or "").strip()
+
+
+def _coerce_str_or_none(value):
+    """String nettoyée, ou None si vide/absente (pour les champs `str | None`)."""
+    text = str(value or "").strip()
+    return text or None
+
+
+def _coerce_bool(value) -> bool:
+    """Booléen tolérant : accepte les vrais bool, ainsi que les chaînes IA usuelles
+    ("true"/"yes"/"oui"/"1") — l'IA renvoie parfois un booléen sous forme de texte."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in ("true", "yes", "oui", "1")
+    return bool(value)
+
+
+def _coerce_str_list(value, max_items: int | None = None) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    items = [str(item).strip() for item in value if str(item).strip()]
+    return items[:max_items] if max_items is not None else items
+
+
+# Spécification {clé: type} des sous-objets à champs "plats" (string / string|None / booléen).
+# La saisonnalité est traitée à part (_normalize_seasonality) car elle contient des listes et
+# une règle de cohérence (mois vides si non saisonnier).
+_STR = "str"
+_STR_OR_NONE = "str_or_none"
+_BOOL = "bool"
+_COERCERS = {_STR: _coerce_str, _STR_OR_NONE: _coerce_str_or_none, _BOOL: _coerce_bool}
+
+_SUPPLIER_PROFILE_SPEC = {
+    "estimated_age": _STR_OR_NONE,
+    "sales_volume": _STR_OR_NONE,
+    "reputation": _STR,
+    "service_quality": _STR,
+    "shipping_speed": _STR,
+    "return_policy": _STR,
+    "dispute_history": _STR_OR_NONE,
+}
+_IMPORT_STRATEGY_SPEC = {
+    "suggested_initial_quantity": _STR,
+    "quantity_reason": _STR,
+    "sales_tips": _STR,
+    "launch_strategy": _STR,
+}
+_LOGISTICS_PROFILE_SPEC = {
+    "fragile": _BOOL,
+    "heavy": _BOOL,
+    "bulky": _BOOL,
+    "liquid": _BOOL,
+    "has_battery": _BOOL,
+    "textile": _BOOL,
+    "electronic": _BOOL,
+}
+
+
+def _normalize_submodel(raw: dict, key: str, spec: dict) -> dict:
+    """Normalise un sous-objet IA à champs plats à partir d'une spec {clé: type}, avec un
+    défaut sûr par clé et en ignorant toute clé superflue renvoyée par l'IA."""
+    obj = raw.get(key)
+    if not isinstance(obj, dict):
+        obj = {}
+    return {field: _COERCERS[kind](obj.get(field)) for field, kind in spec.items()}
+
+
+def _normalize_seasonality(raw: dict) -> dict:
+    obj = raw.get("seasonality")
+    if not isinstance(obj, dict):
+        obj = {}
+    is_seasonal = _coerce_bool(obj.get("is_seasonal"))
+    favorable = _coerce_str_list(obj.get("favorable_months"))
+    unfavorable = _coerce_str_list(obj.get("unfavorable_months"))
+    ideal_period = _coerce_str_or_none(obj.get("ideal_period"))
+    # Cohérence : sans saisonnalité, aucun mois ne doit être renseigné (pas d'hallucination).
+    if not is_seasonal:
+        favorable = []
+        unfavorable = []
+    return {
+        "is_seasonal": is_seasonal,
+        "ideal_period": ideal_period,
+        "favorable_months": favorable,
+        "unfavorable_months": unfavorable,
+    }
+
+
+def _normalize_target_audiences(raw: dict) -> list[str]:
+    """Sous-ensemble filtré de _VALID_TARGET_AUDIENCES (retire toute valeur hors liste et les
+    doublons, en préservant l'ordre de l'IA)."""
+    items = raw.get("target_audiences")
+    if not isinstance(items, list):
+        return []
+    result = []
+    for item in items:
+        value = str(item or "").strip().lower()
+        if value in _VALID_TARGET_AUDIENCES and value not in result:
+            result.append(value)
+    return result
+
+
+def _normalize_marketing_claims(raw: dict) -> list[dict]:
+    """Liste d'objets {claim, justified, explanation}. Ignore les items sans "claim" concret
+    (l'IA ne doit signaler que des termes réellement présents — liste vide sinon)."""
+    items = raw.get("marketing_claims")
+    if not isinstance(items, list):
+        return []
+    result = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        claim = str(item.get("claim", "")).strip()
+        if not claim:
+            continue
+        result.append(
+            {
+                "claim": claim,
+                "justified": _coerce_bool(item.get("justified")),
+                "explanation": str(item.get("explanation", "")).strip(),
+            }
+        )
     return result
 
 
@@ -591,7 +821,60 @@ def _normalize_ai_result(raw: dict, language: str = DEFAULT_LANGUAGE) -> dict:
         ).strip(),
         "resale_ease_rating": _clamp_rating(raw.get("resale_ease_rating")),
         "resale_ease_explanation": str(raw.get("resale_ease_explanation", "") or "").strip(),
+        # --- v1.3 : avis clients, profil vendeur, public cible, stratégie, saisonnalité,
+        # saturation, produits complémentaires, logistique, difficulté d'import, marketing ---
+        "reviews_available": _coerce_bool(raw.get("reviews_available")),
+        "review_highlights": _coerce_str_list(raw.get("review_highlights"), _MAX_REVIEW_ITEMS),
+        "review_complaints": _coerce_str_list(raw.get("review_complaints"), _MAX_REVIEW_ITEMS),
+        "review_recurring_defects": _coerce_str_list(
+            raw.get("review_recurring_defects"), _MAX_REVIEW_ITEMS
+        ),
+        "review_satisfaction": _normalize_enum(
+            raw.get("review_satisfaction"), _VALID_REVIEW_SATISFACTION, "medium"
+        ),
+        # supplier_profile.overall_trust est écrasé côté serveur juste après (voir plus bas).
+        "supplier_profile": _normalize_submodel(raw, "supplier_profile", _SUPPLIER_PROFILE_SPEC),
+        "target_audiences": _normalize_target_audiences(raw),
+        "target_audience_explanation": str(
+            raw.get("target_audience_explanation", "") or ""
+        ).strip(),
+        "import_strategy": _normalize_submodel(raw, "import_strategy", _IMPORT_STRATEGY_SPEC),
+        "seasonality": _normalize_seasonality(raw),
+        "saturation_level": _normalize_enum(
+            raw.get("saturation_level"), _VALID_SATURATION_LEVELS, "competitive"
+        ),
+        "saturation_explanation": str(raw.get("saturation_explanation", "") or "").strip(),
+        "complementary_products": _coerce_str_list(
+            raw.get("complementary_products"), _MAX_COMPLEMENTARY_PRODUCTS
+        ),
+        "logistics_profile": _normalize_submodel(raw, "logistics_profile", _LOGISTICS_PROFILE_SPEC),
+        "recommended_transport": _normalize_enum(
+            raw.get("recommended_transport"), _VALID_TRANSPORT, "air"
+        ),
+        "transport_explanation": str(raw.get("transport_explanation", "") or "").strip(),
+        "import_difficulty": _normalize_enum(
+            raw.get("import_difficulty"), _VALID_IMPORT_DIFFICULTY, "medium"
+        ),
+        "import_difficulty_explanation": str(
+            raw.get("import_difficulty_explanation", "") or ""
+        ).strip(),
+        "marketing_claims": _normalize_marketing_claims(raw),
+        "importer_summary": _coerce_str_list(raw.get("importer_summary"), _MAX_IMPORTER_SUMMARY),
     }
+
+    # supplier_profile.overall_trust : TOUJOURS calculé côté serveur à partir de
+    # "supplier_reliability" déjà déterminé (yes/medium/no), jamais lu depuis la réponse IA
+    # brute — même principe déterministe que confidence_level. La spec de _normalize_submodel
+    # omet volontairement overall_trust pour que la valeur IA soit ignorée puis écrasée ici.
+    result["supplier_profile"]["overall_trust"] = _OVERALL_TRUST_MAP[result["supplier_reliability"]]
+
+    # Garde-fou serveur (même esprit que le nettoyage des mois de "seasonality") : si l'IA
+    # indique qu'aucun avis n'est disponible, on ne fait pas confiance à elle seule pour avoir
+    # respecté la consigne de laisser les listes vides — on les force ici.
+    if not result["reviews_available"]:
+        result["review_highlights"] = []
+        result["review_complaints"] = []
+        result["review_recurring_defects"] = []
 
     # Résumé compact sur une ligne, calculé STRICTEMENT côté serveur (jamais par l'IA),
     # destiné au futur affichage dans une bulle flottante mobile
