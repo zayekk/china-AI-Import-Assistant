@@ -30,6 +30,7 @@ from ai_engine.services.product_analysis_service import (
     _fallback_result,
     _normalize_ai_result,
 )
+from ai_engine.services.timing import StepTimer, log_step
 
 logger = logging.getLogger(__name__)
 
@@ -155,6 +156,7 @@ def analyze_multi_capture(
     "captures", "categories_covered" et "categories_missing".
     """
     # a. OCR de chaque capture (tolérant : une capture en échec ne fait pas échouer le lot).
+    ocr_timer = StepTimer()
     ocr_texts: list[str] = []
     ocr_failed_flags: list[bool] = []
     for filename, image_bytes in captures:
@@ -166,8 +168,15 @@ def analyze_multi_capture(
             text = ""
             ocr_failed_flags.append(True)
         ocr_texts.append(text)
+    log_step(
+        "ocr",
+        ocr_timer.elapsed(),
+        captures_count=len(captures),
+        failed_count=sum(ocr_failed_flags),
+    )
 
     # b. Hash perceptuel + détection des doublons.
+    fusion_timer = StepTimer()
     hashes = [compute_phash(image_bytes) for _, image_bytes in captures]
     duplicates_map = detect_duplicates(hashes)  # {index_doublon: index_original}
 
@@ -199,16 +208,33 @@ def analyze_multi_capture(
     aggregated_text = "\n".join(
         text for texts in categorized_sections.values() for text in texts
     )
+    log_step(
+        "fusion",
+        fusion_timer.elapsed(),
+        duplicates_count=len(duplicates_map),
+        categories_count=len(categorized_sections),
+        aggregated_chars=len(aggregated_text),
+    )
 
     # f. Appel IA consolidé (même contrat que analyze_product_text), avec fallback gracieux.
     language = language if language in ("fr", "en") else DEFAULT_LANGUAGE
     try:
+        prompt_timer = StepTimer()
         user_prompt = build_user_prompt_for_multi_capture_analysis(categorized_sections)
+        system_prompt = build_system_prompt(language)
+        log_step(
+            "prompt_build",
+            prompt_timer.elapsed(),
+            system_chars=len(system_prompt),
+            user_chars=len(user_prompt),
+        )
         raw_result = mistral_client.chat_completion_json(
-            system_prompt=build_system_prompt(language),
+            system_prompt=system_prompt,
             user_prompt=user_prompt,
         )
+        normalize_timer = StepTimer()
         result = _normalize_ai_result(raw_result, language)
+        log_step("normalize", normalize_timer.elapsed())
     except MistralAPIError as exc:
         # Log explicite AVANT le repli, avec le type d'exception d'origine — voir la note
         # équivalente dans product_analysis_service.py::analyze_product_text().

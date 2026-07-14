@@ -75,45 +75,16 @@ Analyser un texte produit (titre, description, variantes) afin de :
 10. Évaluer un score de confiance ("confidence_score") reflétant la fiabilité de TA PROPRE analyse,
     accompagné de justifications ("confidence_reasons") et des risques induits par le manque
     d'information ("confidence_risks").
-11. Détecter les incohérences importantes entre les différentes parties du texte source
-    (titre, description, caractéristiques, avis, texte OCR de plusieurs captures) : voir
-    "RÈGLE SUR LES ALERTES CRITIQUES" ci-dessous.
-12. Rédiger une estimation commerciale (coût, revente, marge) si les données le permettent :
-    voir "RÈGLE SUR L'ESTIMATION COMMERCIALE" ci-dessous.
-13. Rédiger une synthèse de recommandation en 2 à 4 phrases simples ("ai_recommendation_summary"),
+11. Rédiger une synthèse de recommandation en 2 à 4 phrases simples ("ai_recommendation_summary"),
     compréhensible par un débutant, résumant le verdict global et sa raison principale (angle :
     sécurité de l'achat, correspond-il au titre ?).
-14. Évaluer le potentiel commercial sur 5 (1 à 5) et l'expliquer : voir "RÈGLE SUR LE POTENTIEL
-    COMMERCIAL" ci-dessous.
-15. Rédiger une explication de décision d'import ("import_decision_explanation") : voir "RÈGLE
-    SUR LA DÉCISION D'IMPORT" ci-dessous.
-16. Comparer chaque composant technique détecté (GPU, CPU, RAM, SSD...) à des références connues
-    du marché : voir "RÈGLE SUR LA COMPARAISON MARCHÉ" ci-dessous.
-17. Évaluer la demande du marché pour ce type de produit : voir "RÈGLE SUR LA DEMANDE" ci-dessous.
-18. Rédiger un rapport rapide de lecture ultra-courte : voir "RÈGLE SUR LE RAPPORT RAPIDE" ci-dessous.
-19. Lister jusqu'à 5 raisons courtes justifiant la décision globale : voir "RÈGLE SUR LES RAISONS
-    DE LA DÉCISION" ci-dessous.
-20. Noter le potentiel "produit gagnant" sur 10 et l'expliquer : voir "RÈGLE SUR LE WINNING
-    PRODUCT SCORE" ci-dessous.
-21. Évaluer le niveau de concurrence : voir "RÈGLE SUR LA CONCURRENCE" ci-dessous.
-22. Évaluer ta confiance séparément par catégorie de donnée (prix, spécifications, photos, avis,
-    OCR) : voir "RÈGLE SUR LA CONFIANCE PAR CATÉGORIE" ci-dessous.
-23. Évaluer le positionnement du produit sur le marché et son prix moyen si tu le connais : voir
-    "RÈGLE SUR LE POSITIONNEMENT MARCHÉ" ci-dessous.
-24. Évaluer la facilité de revente sur 5 et l'expliquer : voir "RÈGLE SUR LA FACILITÉ DE REVENTE"
-    ci-dessous.
-25. Synthétiser ce que disent RÉELLEMENT les clients (avis) : voir "RÈGLE SUR LES AVIS CLIENTS".
-26. Dresser le profil du vendeur : voir "RÈGLE SUR LE PROFIL VENDEUR".
-27. Identifier le public cible : voir "RÈGLE SUR LE PUBLIC CIBLE".
-28. Proposer une stratégie commerciale d'import : voir "RÈGLE SUR LA STRATÉGIE D'IMPORT".
-29. Analyser la saisonnalité du produit : voir "RÈGLE SUR LA SAISONNALITÉ".
-30. Évaluer le niveau de saturation du marché : voir "RÈGLE SUR LA SATURATION".
-31. Suggérer des produits complémentaires : voir "RÈGLE SUR LES PRODUITS COMPLÉMENTAIRES".
-32. Établir le profil logistique et le transport recommandé : voir "RÈGLE SUR LA LOGISTIQUE".
-33. Évaluer la difficulté d'importation : voir "RÈGLE SUR LA DIFFICULTÉ D'IMPORT".
-34. Détecter les termes marketing potentiellement trompeurs : voir "RÈGLE SUR LE MARKETING
-    TROMPEUR".
-35. Rédiger un résumé importateur final : voir "RÈGLE SUR LE RÉSUMÉ IMPORTATEUR".
+12. Remplir intégralement CHAQUE règle détaillée ci-dessous — chacune correspond à un ou plusieurs
+    champs obligatoires du JSON de sortie : alertes critiques, estimation commerciale, potentiel
+    commercial, décision d'import, comparaison marché, demande, rapport rapide, raisons de la
+    décision, winning product score, concurrence, confiance par catégorie, positionnement marché,
+    facilité de revente, avis clients, profil vendeur, public cible, stratégie d'import,
+    saisonnalité, saturation, produits complémentaires, logistique, difficulté d'import, marketing
+    trompeur, résumé importateur.
 
 RÈGLE ANTI-RÉPÉTITION (qualité rédactionnelle) :
 - Ne répète JAMAIS la même information ou la même phrase dans plusieurs champs (ex :
@@ -138,13 +109,13 @@ RÈGLE SUR LE POTENTIEL COMMERCIAL :
   potentiel. Fonde ton évaluation sur : le prix, la concurrence probable sur ce type de produit,
   le type de produit (mode/tech/consommable...), les risques identifiés, la marge potentielle,
   la facilité de revente, et le public cible.
-- "commercial_potential_explanation" : 1 à 3 phrases expliquant CONCRÈTEMENT la note, en
+- "commercial_potential_explanation" : 1 à 2 phrases expliquant CONCRÈTEMENT la note, en
   mentionnant les facteurs ci-dessus les plus déterminants pour CE produit précis.
 - Ne renvoie jamais de champ "commercial_potential" catégoriel (low/medium/high) : celui-ci est
   déterminé uniquement côté serveur à partir du score de marge.
 
 RÈGLE SUR LA DÉCISION D'IMPORT :
-- "import_decision_explanation" : 1 à 3 phrases sur la viabilité commerciale d'importer CE
+- "import_decision_explanation" : 1 à 2 phrases sur la viabilité commerciale d'importer CE
   produit pour le revendre (PAS sur la sécurité de l'achat, déjà couverte par
   "ai_recommendation_summary" — angle différent, voir RÈGLE ANTI-RÉPÉTITION).
 - Ne renvoie jamais de champ "import_decision" (import/study/avoid) : déterminé côté serveur.
@@ -162,13 +133,13 @@ RÈGLE SUR LE WINNING PRODUCT SCORE :
   les risques identifiés. 10 = produit gagnant idéal, 0 = à éviter absolument pour la revente.
   RÈGLE ABSOLUE : ce score ne peut PAS dépasser 3/10 si "critical_alerts" contient une
   contradiction grave.
-- "winning_product_explanation" : 1 à 2 phrases mentionnant les facteurs les plus déterminants
+- "winning_product_explanation" : 1 phrase courte mentionnant le facteur le plus déterminant
   parmi les 6 ci-dessus pour CE produit précis.
 
 RÈGLE SUR LA CONCURRENCE :
 - "competition_level" doit valoir exactement l'une de : "low", "medium", "high", "very_high".
-- "competition_explanation" : 1 à 2 phrases expliquant pourquoi (nombre de vendeurs similaires
-  probable, produit générique ou différencié, saturation du marché...).
+- "competition_explanation" : 1 phrase courte expliquant pourquoi (nombre de vendeurs
+  similaires probable, produit générique ou différencié, saturation du marché...).
 
 RÈGLE SUR LA CONFIANCE PAR CATÉGORIE :
 - "data_confidence" est un objet avec 5 clés, chacune un entier 0-100 : "price" (fiabilité du
@@ -189,12 +160,12 @@ RÈGLE SUR LE POSITIONNEMENT MARCHÉ :
 - "market_positioning" doit valoir exactement l'une de : "premium", "mid_range", "entry_level",
   "saturated", "unknown". Utilise "unknown" si le texte ne permet pas de trancher — jamais de
   fausse certitude.
-- "market_positioning_explanation" : 1 à 2 phrases justifiant ce positionnement.
+- "market_positioning_explanation" : 1 phrase courte justifiant ce positionnement.
 
 RÈGLE SUR LA FACILITÉ DE REVENTE :
 - "resale_ease_rating" (entier 1 à 5) : 5 = très facile à revendre rapidement, 1 = très difficile.
-- "resale_ease_explanation" : 1 à 2 phrases (public cible, saisonnalité, encombrement/poids pour
-  l'expédition locale, notoriété de la marque...).
+- "resale_ease_explanation" : 1 phrase courte (public cible, saisonnalité, encombrement/poids
+  pour l'expédition locale, notoriété de la marque...).
 
 RÈGLE SUR LA COMPARAISON MARCHÉ :
 - "market_comparisons" (liste d'objets {{"component", "detected_value", "comparison"}}) :
@@ -212,7 +183,7 @@ RÈGLE SUR LA COMPARAISON MARCHÉ :
 RÈGLE SUR LA DEMANDE :
 - "demand_level" doit valoir exactement l'une de : "very_high", "high", "medium", "low",
   "very_low", reflétant la demande de marché estimée pour ce type de produit.
-- "demand_explanation" : 1 à 2 phrases expliquant pourquoi (tendance, saisonnalité, utilité
+- "demand_explanation" : 1 phrase courte expliquant pourquoi (tendance, saisonnalité, utilité
   générale, niche...).
 
 RÈGLE SUR LE RAPPORT RAPIDE :
@@ -333,7 +304,7 @@ RÈGLE SUR LE PUBLIC CIBLE :
 - "target_audiences" (liste) : sous-ensemble STRICT de ces valeurs autorisées : "students",
   "children", "professionals", "gamers", "women", "men", "gifts", "luxury", "daily_use", "other".
   N'utilise AUCUNE autre valeur (toute valeur hors liste sera ignorée). Liste vide si indéterminable.
-- "target_audience_explanation" : 1 à 2 phrases justifiant le(s) public(s) retenu(s).
+- "target_audience_explanation" : 1 phrase courte justifiant le(s) public(s) retenu(s).
 
 RÈGLE SUR LA STRATÉGIE D'IMPORT :
 - "import_strategy" est un objet : "suggested_initial_quantity" (quantité de premier
@@ -354,7 +325,7 @@ RÈGLE SUR LA SATURATION :
   et la force des vendeurs concurrents, tandis que la saturation mesure l'offre du marché par
   rapport à la demande. Un marché peut avoir peu de concurrents mais être déjà saturé par du
   dropshipping massif, ou l'inverse.
-- "saturation_explanation" : 1 à 2 phrases justifiant ce niveau.
+- "saturation_explanation" : 1 phrase courte justifiant ce niveau.
 
 RÈGLE SUR LES PRODUITS COMPLÉMENTAIRES :
 - "complementary_products" (liste, 6 maximum) : accessoires/produits pertinents à vendre AVEC ce
@@ -366,14 +337,14 @@ RÈGLE SUR LA LOGISTIQUE :
   "fragile", "heavy", "bulky", "liquid", "has_battery", "textile", "electronic". Déduis-les du
   texte et de la catégorie du produit.
 - "recommended_transport" doit valoir exactement l'une de : "air", "sea", "mixed".
-- "transport_explanation" : 1 à 2 phrases justifiant le mode de transport recommandé.
+- "transport_explanation" : 1 phrase courte justifiant le mode de transport recommandé.
 
 RÈGLE SUR LA DIFFICULTÉ D'IMPORT :
 - "import_difficulty" doit valoir exactement l'une de : "very_easy", "easy", "medium", "hard".
   Tiens compte de la douane, du "logistics_profile" (fragilité, volume, batterie...) et des
   risques déjà identifiés dans CETTE MÊME réponse — reste COHÉRENT, ne contredis jamais
   "logistics_profile" (ex: un produit fragile + avec batterie ne peut pas être "very_easy").
-- "import_difficulty_explanation" : 1 à 2 phrases justifiant ce niveau.
+- "import_difficulty_explanation" : 1 phrase courte justifiant ce niveau.
 
 RÈGLE SUR LE MARKETING TROMPEUR :
 - "marketing_claims" (liste d'objets {{"claim", "justified", "explanation"}}) : surveille les
@@ -504,25 +475,16 @@ sans balises markdown, respectant EXACTEMENT ce schéma :
 }}
 
 "recommendation" doit valoir exactement "BUY", "AVOID" ou "CAUTION".
-"demand_level" doit valoir exactement "very_high", "high", "medium", "low" ou "very_low".
-"competition_level" doit valoir exactement "low", "medium", "high" ou "very_high".
-"market_positioning" doit valoir exactement "premium", "mid_range", "entry_level", "saturated"
-ou "unknown".
-Tous les scores 0-100 sont des entiers, y compris les 5 clés de "data_confidence".
-"commercial_potential_rating" et "resale_ease_rating" sont des entiers 1-5.
-"winning_product_score" est un entier 0-10.
+Tous les scores 0-100 sont des entiers, y compris les 5 clés de "data_confidence". Les enums
+("demand_level", "competition_level", "market_positioning", "review_satisfaction",
+"saturation_level", "recommended_transport", "import_difficulty", "target_audiences") doivent
+respecter EXACTEMENT les valeurs autorisées données dans leur RÈGLE respective ci-dessus — aucune
+autre valeur n'est acceptée.
 "detected_data" et "ai_estimations" sont des objets JSON à clés/valeurs strings (pas de listes,
 pas d'objets imbriqués). "missing_information", "confidence_reasons", "confidence_risks",
 "critical_alerts", "quick_report" et "decision_reasons" (5 éléments MAXIMUM) sont des listes de
 strings. "market_comparisons" est une liste d'objets à 3 clés strings (liste vide si aucun
 composant comparable détecté).
-"review_satisfaction" doit valoir exactement "very_high", "high", "medium", "low" ou "very_low".
-"saturation_level" doit valoir exactement "low", "competitive", "saturated" ou
-"extremely_saturated".
-"recommended_transport" doit valoir exactement "air", "sea" ou "mixed".
-"import_difficulty" doit valoir exactement "very_easy", "easy", "medium" ou "hard".
-"target_audiences" est une liste dont chaque valeur est UNIQUEMENT l'une de : "students",
-"children", "professionals", "gamers", "women", "men", "gifts", "luxury", "daily_use", "other".
 "supplier_profile", "import_strategy", "seasonality" et "logistics_profile" sont des objets aux
 clés exactes indiquées ci-dessus. NE renvoie JAMAIS "overall_trust" dans "supplier_profile" :
 il est calculé côté serveur. "review_highlights", "review_complaints" et

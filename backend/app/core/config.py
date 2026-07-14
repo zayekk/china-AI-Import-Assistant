@@ -60,7 +60,13 @@ class Settings(BaseSettings):
     MISTRAL_API_KEY: str = ""
     MISTRAL_MODEL: str = "mistral-large-latest"
     MISTRAL_API_URL: str = "https://api.mistral.ai/v1/chat/completions"
-    MISTRAL_TIMEOUT_SECONDS: int = 60
+    # 90s : mesuré en conditions réelles, la génération JSON complète (65+ champs) prend
+    # 36-37s sur un prompt système ~30k caractères — 60s ne laissait qu'~1.6x de marge, ce qui
+    # suffisait à déclencher des ReadTimeout sous une latence réseau ou une charge Mistral
+    # légèrement supérieure à la moyenne. 90s donne ~2.4x de marge sur le pire cas mesuré, sans
+    # faire attendre l'utilisateur démesurément avant le repli local (voir _MAX_RETRIES_ON_TIMEOUT
+    # dans ai_engine/services/mistral_client.py : une seule tentative supplémentaire sur timeout).
+    MISTRAL_TIMEOUT_SECONDS: int = 90
     # API OCR dédiée de Mistral (réutilise MISTRAL_API_KEY) : utilisée uniquement en
     # repli quand le binaire Tesseract local est absent (voir ai_engine/services/ocr_service.py).
     MISTRAL_OCR_API_URL: str = "https://api.mistral.ai/v1/ocr"

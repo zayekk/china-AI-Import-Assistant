@@ -19,6 +19,7 @@ from ai_engine.prompts.product_prompts import (
     build_user_prompt_for_text_analysis,
 )
 from ai_engine.services.mistral_client import MistralAPIError, mistral_client
+from ai_engine.services.timing import StepTimer, log_step
 
 logger = logging.getLogger(__name__)
 
@@ -968,12 +969,22 @@ def analyze_product_text(raw_text: str, language: str = DEFAULT_LANGUAGE) -> dic
     """
     language = language if language in _VALID_LANGUAGES else DEFAULT_LANGUAGE
     try:
+        prompt_timer = StepTimer()
         user_prompt = build_user_prompt_for_text_analysis(raw_text)
+        system_prompt = build_system_prompt(language)
+        log_step(
+            "prompt_build",
+            prompt_timer.elapsed(),
+            system_chars=len(system_prompt),
+            user_chars=len(user_prompt),
+        )
         raw_result = mistral_client.chat_completion_json(
-            system_prompt=build_system_prompt(language),
+            system_prompt=system_prompt,
             user_prompt=user_prompt,
         )
+        normalize_timer = StepTimer()
         result = _normalize_ai_result(raw_result, language)
+        log_step("normalize", normalize_timer.elapsed())
 
     except MistralAPIError as exc:
         # Log explicite AVANT le repli, avec le type d'exception d'origine (souvent la vraie

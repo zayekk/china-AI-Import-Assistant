@@ -12,7 +12,34 @@ import httpx
 
 from app.core.config import settings
 
+from ai_engine.services.timing import StepTimer, estimate_tokens, log_step
+
 logger = logging.getLogger(__name__)
+
+# Plafond du backoff exponentiel entre tentatives sur erreur TRANSITOIRE (5xx, erreur réseau,
+# rate limit sans Retry-After) : 2, 4, 8, 16... secondes, plafonné à 16s. Un plafond plus élevé
+# qu'avant (8s) car les erreurs transitoires bénéficient réellement d'une pause plus longue.
+_BACKOFF_CAP_SECONDS = 16
+
+# Sur un ReadTimeout, retenter avec EXACTEMENT le même prompt (donc probablement le même temps
+# de génération) a un rendement décroissant : une seule tentative supplémentaire suffit à
+# absorber une lenteur ponctuelle, sans faire attendre l'utilisateur 3x le timeout complet
+# (avec max_retries=2 classique, un pire cas de 3 tentatives à 90s chacune = 4m30 d'attente
+# avant le repli local). Les erreurs transitoires (réseau, 5xx, 429) gardent le budget complet.
+_MAX_RETRIES_ON_TIMEOUT = 1
+
+
+def _parse_retry_after(header_value: str) -> float:
+    """
+    Parse l'en-tête HTTP Retry-After (RFC 9110) : soit un nombre de secondes, soit une date
+    HTTP. On ne gère explicitement que le format numérique (de très loin le plus utilisé par
+    les API de rate limiting comme celle de Mistral) ; toute valeur non numérique retombe sur
+    le backoff exponentiel standard plutôt que d'échouer sur un format de date à parser.
+    """
+    try:
+        return max(0.0, float(header_value))
+    except (TypeError, ValueError):
+        return float(_BACKOFF_CAP_SECONDS)
 
 
 class MistralAPIError(Exception):
@@ -54,6 +81,14 @@ class MistralClient:
         """
         Appelle Mistral en mode chat completion et force une réponse JSON.
         Retourne le dict Python parsé depuis la réponse du modèle.
+
+        Stratégie de retry DIFFÉRENCIÉE par type d'erreur (voir _MAX_RETRIES_ON_TIMEOUT et
+        _BACKOFF_CAP_SECONDS) : un ReadTimeout sur un prompt volumineux a peu de chances d'être
+        résolu par une 3e tentative identique (même prompt, même modèle, temps de génération
+        probablement similaire) — une seule tentative supplémentaire suffit, pour ne pas faire
+        attendre l'utilisateur plusieurs multiples du timeout avant le repli local. Les erreurs
+        réellement transitoires (réseau, 5xx, rate limit) gardent le budget complet de retries,
+        avec un vrai backoff exponentiel (et Retry-After honoré sur 429 si présent).
         """
         payload = {
             "model": self.model,
@@ -65,9 +100,31 @@ class MistralClient:
             "response_format": {"type": "json_object"},
         }
 
-        last_error: Exception | None = None
+        system_tokens = estimate_tokens(system_prompt)
+        user_tokens = estimate_tokens(user_prompt)
+        log_step(
+            "prompt_size",
+            0.0,
+            model=self.model,
+            system_chars=len(system_prompt),
+            system_tokens_est=system_tokens,
+            user_chars=len(user_prompt),
+            user_tokens_est=user_tokens,
+            total_tokens_est=system_tokens + user_tokens,
+            timeout_s=self.timeout,
+        )
 
-        for attempt in range(1, max_retries + 2):
+        last_error: Exception | None = None
+        call_timer = StepTimer()
+        attempt = 0
+        # Nombre de tentatives déjà "consommées" spécifiquement par des timeouts, pour
+        # appliquer le budget réduit (_MAX_RETRIES_ON_TIMEOUT) indépendamment des tentatives
+        # consommées par d'autres types d'erreur (qui gardent le budget `max_retries` complet).
+        timeout_attempts = 0
+
+        while True:
+            attempt += 1
+            attempt_timer = StepTimer()
             try:
                 with httpx.Client(timeout=self.timeout) as client:
                     response = client.post(
@@ -76,32 +133,89 @@ class MistralClient:
                 response.raise_for_status()
                 data = response.json()
                 content = data["choices"][0]["message"]["content"]
-                return self._safe_json_parse(content)
+                network_duration = attempt_timer.elapsed()
+
+                parse_timer = StepTimer()
+                result = self._safe_json_parse(content)
+                log_step(
+                    "mistral_call",
+                    network_duration,
+                    attempt=attempt,
+                    model=self.model,
+                    outcome="success",
+                    response_chars=len(content),
+                )
+                log_step("json_parse", parse_timer.elapsed(), response_chars=len(content))
+                log_step("mistral_call_total", call_timer.elapsed(), attempts=attempt, outcome="success")
+                return result
 
             except httpx.HTTPStatusError as exc:
                 last_error = exc
+                status = exc.response.status_code
+                log_step(
+                    "mistral_call",
+                    attempt_timer.elapsed(),
+                    attempt=attempt,
+                    model=self.model,
+                    outcome=f"http_{status}",
+                )
                 logger.warning(
-                    "Mistral API HTTP error (attempt %s/%s): %s - %s",
+                    "Mistral API HTTP error (attempt %s): %s - %s",
                     attempt,
-                    max_retries + 1,
-                    exc.response.status_code,
+                    status,
                     exc.response.text[:500],
                 )
-                if exc.response.status_code in (401, 403):
-                    # Inutile de retry sur une erreur d'authentification
+                if status in (401, 403):
+                    break  # inutile de retry sur une erreur d'authentification
+                if attempt > max_retries:
                     break
-                time.sleep(min(2 ** attempt, 8))
+                retry_after = exc.response.headers.get("Retry-After")
+                if status == 429 and retry_after:
+                    wait_seconds = _parse_retry_after(retry_after)
+                else:
+                    wait_seconds = min(2 ** attempt, _BACKOFF_CAP_SECONDS)
+                logger.info("Nouvelle tentative dans %.1fs (backoff)", wait_seconds)
+                time.sleep(wait_seconds)
+
+            except httpx.TimeoutException as exc:
+                last_error = exc
+                timeout_attempts += 1
+                log_step(
+                    "mistral_call",
+                    attempt_timer.elapsed(),
+                    attempt=attempt,
+                    model=self.model,
+                    outcome="timeout",
+                )
+                logger.warning(
+                    "Mistral API timeout (attempt %s, budget timeout %s/%s) après %.1fs — "
+                    "prompt total ≈%s tokens, timeout configuré %ss.",
+                    attempt,
+                    timeout_attempts,
+                    _MAX_RETRIES_ON_TIMEOUT + 1,
+                    attempt_timer.elapsed(),
+                    system_tokens + user_tokens,
+                    self.timeout,
+                )
+                if timeout_attempts > _MAX_RETRIES_ON_TIMEOUT:
+                    break
+                time.sleep(min(2 ** attempt, _BACKOFF_CAP_SECONDS))
 
             except (httpx.RequestError, KeyError, json.JSONDecodeError) as exc:
                 last_error = exc
-                logger.warning(
-                    "Mistral API error (attempt %s/%s): %s",
-                    attempt,
-                    max_retries + 1,
-                    str(exc),
+                log_step(
+                    "mistral_call",
+                    attempt_timer.elapsed(),
+                    attempt=attempt,
+                    model=self.model,
+                    outcome=type(exc).__name__,
                 )
-                time.sleep(min(2 ** attempt, 8))
+                logger.warning("Mistral API error (attempt %s): %s", attempt, str(exc))
+                if attempt > max_retries:
+                    break
+                time.sleep(min(2 ** attempt, _BACKOFF_CAP_SECONDS))
 
+        log_step("mistral_call_total", call_timer.elapsed(), attempts=attempt, outcome="failed")
         raise MistralAPIError(f"Échec de l'appel à Mistral après plusieurs tentatives: {last_error}")
 
     def ocr_extract_text(
@@ -125,8 +239,10 @@ class MistralClient:
         }
 
         last_error: Exception | None = None
+        total_timer = StepTimer()
 
         for attempt in range(1, max_retries + 2):
+            call_timer = StepTimer()
             try:
                 with httpx.Client(timeout=self.timeout) as client:
                     response = client.post(
@@ -135,10 +251,48 @@ class MistralClient:
                 response.raise_for_status()
                 data = response.json()
                 pages = data.get("pages", [])
-                return "\n".join(page.get("markdown", "") for page in pages).strip()
+                text = "\n".join(page.get("markdown", "") for page in pages).strip()
+                log_step(
+                    "mistral_ocr_call",
+                    call_timer.elapsed(),
+                    attempt=attempt,
+                    model=self.ocr_model,
+                    image_bytes=len(image_bytes),
+                    result_chars=len(text),
+                    outcome="success",
+                )
+                log_step("mistral_ocr_call_total", total_timer.elapsed(), attempts=attempt, outcome="success")
+                return text
+
+            except httpx.TimeoutException as exc:
+                last_error = exc
+                log_step(
+                    "mistral_ocr_call",
+                    call_timer.elapsed(),
+                    attempt=attempt,
+                    model=self.ocr_model,
+                    timeout_configured=self.timeout,
+                    outcome="timeout",
+                )
+                logger.warning(
+                    "Mistral OCR API timeout (attempt %s/%s, timeout configuré=%ss): %s",
+                    attempt,
+                    max_retries + 1,
+                    self.timeout,
+                    str(exc),
+                )
+                time.sleep(min(2 ** attempt, _BACKOFF_CAP_SECONDS))
 
             except httpx.HTTPStatusError as exc:
                 last_error = exc
+                log_step(
+                    "mistral_ocr_call",
+                    call_timer.elapsed(),
+                    attempt=attempt,
+                    model=self.ocr_model,
+                    status_code=exc.response.status_code,
+                    outcome="http_error",
+                )
                 logger.warning(
                     "Mistral OCR API HTTP error (attempt %s/%s): %s - %s",
                     attempt,
@@ -148,18 +302,26 @@ class MistralClient:
                 )
                 if exc.response.status_code in (401, 403):
                     break
-                time.sleep(min(2 ** attempt, 8))
+                time.sleep(min(2 ** attempt, _BACKOFF_CAP_SECONDS))
 
             except (httpx.RequestError, KeyError, json.JSONDecodeError) as exc:
                 last_error = exc
+                log_step(
+                    "mistral_ocr_call",
+                    call_timer.elapsed(),
+                    attempt=attempt,
+                    model=self.ocr_model,
+                    outcome="request_error",
+                )
                 logger.warning(
                     "Mistral OCR API error (attempt %s/%s): %s",
                     attempt,
                     max_retries + 1,
                     str(exc),
                 )
-                time.sleep(min(2 ** attempt, 8))
+                time.sleep(min(2 ** attempt, _BACKOFF_CAP_SECONDS))
 
+        log_step("mistral_ocr_call_total", total_timer.elapsed(), outcome="failed")
         raise MistralAPIError(f"Échec de l'appel OCR à Mistral après plusieurs tentatives: {last_error}")
 
     @staticmethod

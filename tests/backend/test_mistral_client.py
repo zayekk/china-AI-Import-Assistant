@@ -16,10 +16,11 @@ import pytest
 from ai_engine.services.mistral_client import MistralAPIError, MistralClient
 
 
-def _mock_response(status_code=200, json_data=None):
+def _mock_response(status_code=200, json_data=None, headers=None):
     resp = MagicMock()
     resp.status_code = status_code
     resp.json.return_value = json_data or {}
+    resp.headers = headers or {}
     if status_code >= 400:
         resp.raise_for_status.side_effect = httpx.HTTPStatusError(
             "error", request=MagicMock(), response=resp
@@ -166,6 +167,64 @@ def test_chat_completion_json_retries_on_transient_http_error():
 
     assert result == {"recommendation": "BUY"}
     assert mock_client.post.call_count == 2
+
+
+def test_chat_completion_json_retries_once_on_timeout_then_succeeds():
+    """Un ReadTimeout isolé (lenteur ponctuelle de génération) doit être absorbé par UNE
+    seule tentative supplémentaire, comme un vrai réseau/API instable."""
+    client = MistralClient(api_key="test-key")
+    with patch("httpx.Client") as mock_client_cls:
+        mock_client = MagicMock()
+        mock_client.post.side_effect = [
+            httpx.ReadTimeout("timed out", request=MagicMock()),
+            _mock_response(json_data=_completion_payload('{"recommendation": "BUY"}')),
+        ]
+        mock_client_cls.return_value.__enter__.return_value = mock_client
+
+        with patch("time.sleep"):
+            result = client.chat_completion_json(system_prompt="sys", user_prompt="user", max_retries=2)
+
+    assert result == {"recommendation": "BUY"}
+    assert mock_client.post.call_count == 2
+
+
+def test_chat_completion_json_gives_up_after_one_timeout_retry_regardless_of_max_retries():
+    """Un ReadTimeout persistant a peu de chances d'être résolu par une 3e tentative
+    identique (même prompt, même temps de génération probable) : le budget de retry sur
+    timeout (_MAX_RETRIES_ON_TIMEOUT=1) est plus strict que `max_retries` et prime dessus,
+    pour ne pas faire attendre l'utilisateur plusieurs multiples du timeout complet."""
+    client = MistralClient(api_key="test-key")
+    with patch("httpx.Client") as mock_client_cls:
+        mock_client = MagicMock()
+        mock_client.post.side_effect = httpx.ReadTimeout("timed out", request=MagicMock())
+        mock_client_cls.return_value.__enter__.return_value = mock_client
+
+        with patch("time.sleep"):
+            with pytest.raises(MistralAPIError):
+                client.chat_completion_json(system_prompt="sys", user_prompt="user", max_retries=5)
+
+    # 2 tentatives max (1 initiale + 1 retry), pas 6 (max_retries + 1) : le budget timeout
+    # est indépendant et plus restrictif que le budget des erreurs transitoires.
+    assert mock_client.post.call_count == 2
+
+
+def test_chat_completion_json_honors_retry_after_header_on_429():
+    """Sur un 429 avec Retry-After numérique, la pause doit respecter EXACTEMENT la valeur
+    du serveur plutôt que le backoff exponentiel générique."""
+    client = MistralClient(api_key="test-key")
+    with patch("httpx.Client") as mock_client_cls:
+        mock_client = MagicMock()
+        mock_client.post.side_effect = [
+            _mock_response(status_code=429, headers={"Retry-After": "3"}),
+            _mock_response(json_data=_completion_payload('{"recommendation": "BUY"}')),
+        ]
+        mock_client_cls.return_value.__enter__.return_value = mock_client
+
+        with patch("time.sleep") as mock_sleep:
+            result = client.chat_completion_json(system_prompt="sys", user_prompt="user", max_retries=2)
+
+    assert result == {"recommendation": "BUY"}
+    mock_sleep.assert_called_once_with(3.0)
 
 
 def test_chat_completion_json_error_message_includes_underlying_cause():
