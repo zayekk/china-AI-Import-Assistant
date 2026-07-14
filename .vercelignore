@@ -1,3 +1,9 @@
+# Secrets locaux : ne doivent JAMAIS être bundlés dans le déploiement. Sur Vercel, les
+# variables d'environnement viennent du dashboard (os.environ), jamais d'un fichier .env —
+# celui-ci n'a donc aucune utilité en production et ne doit pas quitter la machine locale.
+backend/.env
+.env
+
 # Environnements / dépendances locales (réinstallées par Vercel depuis requirements.txt / package.json)
 backend/venv/
 frontend/node_modules/
